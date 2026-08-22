@@ -64,28 +64,28 @@ const approximateGaussian = () =>
 
 function makePanelTexture(renderer: THREE.WebGLRenderer) {
   const canvas = document.createElement("canvas");
-  canvas.width = 512;
-  canvas.height = 256;
+  canvas.width = 256;
+  canvas.height = 512;
   const context = canvas.getContext("2d");
   if (!context) return null;
-  const gradient = context.createLinearGradient(0, 0, 512, 256);
+  const gradient = context.createLinearGradient(0, 0, 256, 512);
   gradient.addColorStop(0, "#143f55");
   gradient.addColorStop(0.5, "#082634");
   gradient.addColorStop(1, "#0c3447");
   context.fillStyle = gradient;
-  context.fillRect(0, 0, 512, 256);
+  context.fillRect(0, 0, 256, 512);
   context.strokeStyle = "rgba(170, 225, 237, .38)";
   context.lineWidth = 2;
-  for (let column = 1; column < 12; column += 1) {
+  for (let column = 1; column < 6; column += 1) {
     context.beginPath();
-    context.moveTo((column * 512) / 12, 0);
-    context.lineTo((column * 512) / 12, 256);
+    context.moveTo((column * 256) / 6, 0);
+    context.lineTo((column * 256) / 6, 512);
     context.stroke();
   }
-  for (let row = 1; row < 6; row += 1) {
+  for (let row = 1; row < 12; row += 1) {
     context.beginPath();
-    context.moveTo(0, (row * 256) / 6);
-    context.lineTo(512, (row * 256) / 6);
+    context.moveTo(0, (row * 512) / 12);
+    context.lineTo(256, (row * 512) / 12);
     context.stroke();
   }
   const texture = new THREE.CanvasTexture(canvas);
@@ -333,7 +333,7 @@ export function WindScene({
         arrayGroup.add(rail);
       }
 
-      const supportCount = rowColumns === MODULES_PER_ROW ? RACK_SUPPORTS_PER_ROW : 3;
+      const supportCount = rowColumns === MODULES_PER_ROW ? RACK_SUPPORTS_PER_ROW : 4;
       for (let support = 0; support < supportCount; support += 1) {
         const x = rowOffsetX - rowWidth / 2 + 0.5 + support * ((rowWidth - 1) / (supportCount - 1));
         const postTop = new THREE.Vector3(x, centerHeight - 0.12, z - 0.15);
@@ -976,7 +976,7 @@ export function WindScene({
   return (
     <div className="wind-scene" ref={hostRef}>
       <div className="scene-corner scene-location">
-        <span className="scene-kicker">LANDSCAPE MODULES · R1/R7 SOUTHEAST ALIGNED · {PANEL_TILT_DEG.toFixed(1)}° TILT</span>
+        <span className="scene-kicker">PORTRAIT MODULES · R1/R7 SOUTHEAST ALIGNED · {PANEL_TILT_DEG.toFixed(1)}° TILT</span>
         <strong>20.130687° N, 155.881243° W</strong>
         <span>58-1200 Akoni Pule Hwy · Kohala</span>
       </div>

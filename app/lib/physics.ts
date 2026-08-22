@@ -1,8 +1,8 @@
 export const ROW_COUNT = 7;
-export const MODULES_PER_ROW = 14;
+export const MODULES_PER_ROW = 28;
 export const PANELS_DEEP_PER_ROW = 2;
-export const ROW_COLUMN_COUNTS = [6, 14, 14, 14, 14, 14, 6] as const;
-export const ROW_COLUMN_OFFSETS = [4, 0, 0, 0, 0, 0, 4] as const;
+export const ROW_COLUMN_COUNTS = [14, 28, 28, 28, 28, 28, 14] as const;
+export const ROW_COLUMN_OFFSETS = [7, 0, 0, 0, 0, 0, 7] as const;
 export const ROW_PANEL_COUNTS = ROW_COLUMN_COUNTS.map((columns) => columns * PANELS_DEEP_PER_ROW);
 export const TOTAL_PANEL_COUNT = ROW_PANEL_COUNTS.reduce((total, panels) => total + panels, 0);
 export const POST_STORM_PANEL_COUNT = ROW_PANEL_COUNTS.slice(2).reduce((total, panels) => total + panels, 0);
@@ -10,15 +10,15 @@ export const PANEL_WIDTH_M = 0.992;
 export const PANEL_LENGTH_M = 1.956;
 export const PANEL_THICKNESS_M = 0.04;
 export const PANEL_GAP_M = 0.025;
-export const PANEL_SPAN_M = PANEL_LENGTH_M;
-export const PANEL_SLOPE_M = PANEL_WIDTH_M;
+export const PANEL_SPAN_M = PANEL_WIDTH_M;
+export const PANEL_SLOPE_M = PANEL_LENGTH_M;
 export const TABLE_CHORD_M = PANEL_SLOPE_M * PANELS_DEEP_PER_ROW + PANEL_GAP_M;
 export const ROW_SPACING_M = 4.4;
 export const PANEL_TILT_DEG = 20.1;
 export const LOW_EDGE_CLEARANCE_M = 0.48;
 export const HIGH_EDGE_CLEARANCE_M =
   LOW_EDGE_CLEARANCE_M + Math.sin((PANEL_TILT_DEG * Math.PI) / 180) * TABLE_CHORD_M;
-export const RACK_SUPPORTS_PER_ROW = 5;
+export const RACK_SUPPORTS_PER_ROW = 7;
 export const ARRAY_AXIS_BEARING = 135;
 export const MAUKA_BEARING = 45;
 

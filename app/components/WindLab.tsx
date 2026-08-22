@@ -679,7 +679,7 @@ export function WindLab() {
       </section>
 
       <footer className="lab-footer">
-        <span><span className="status-dot" /> SITE CALIBRATION V0.4 · PHOTO ESTIMATE</span>
+        <span><span className="status-dot" /> SITE CALIBRATION V0.5 · PHOTO ESTIMATE</span>
         <span>JINKO 365 W · {PANEL_LENGTH_M.toFixed(3)} × {PANEL_WIDTH_M.toFixed(3)} m · {PANEL_TILT_DEG.toFixed(1)}° TILT</span>
         <span>{TOTAL_PANEL_COUNT} PRE-STORM · R1/R7 {ROW_PANEL_COUNTS[0]} EACH · R2–6 {ROW_PANEL_COUNTS[1]} EACH · {ROW_SPACING_M.toFixed(2)} m PITCH</span>
       </footer>
@@ -750,17 +750,18 @@ export function WindLab() {
           <section className="modal assumptions-modal" role="dialog" aria-modal="true" aria-label="Model assumptions" onMouseDown={(event) => event.stopPropagation()}>
             <div className="modal-head">
               <div>
-                <span className="eyebrow">MODEL BASIS · V0.4</span>
+                <span className="eyebrow">MODEL BASIS · V0.5</span>
                 <h2>What this model can test</h2>
               </div>
               <button className="icon-button" onClick={() => setShowAssumptions(false)} aria-label="Close assumptions"><X size={18} /></button>
             </div>
             <div className="assumption-grid">
-              <article><span>01</span><h3>Photo-counted geometry</h3><p>Rows 1 and 7 have six southeast-aligned columns. Rows 2–6 have 14 columns. Each table uses two landscape panels along the slope.</p></article>
+              <article><span>01</span><h3>Photo-counted geometry</h3><p>Rows 1 and 7 have 14 southeast-aligned columns. Rows 2–6 have 28 columns. Each table uses two portrait panels along the slope.</p></article>
               <article><span>02</span><h3>Flow response</h3><p>The particle field follows each rack surface. It models underside acceleration, surface blocking, wake decay, and turbulence. It is not full CFD.</p></article>
               <article><span>03</span><h3>Vibration</h3><p>The model compares a panel-scale shedding estimate with an adjustable natural frequency and damping ratio.</p></article>
               <article><span>04</span><h3>Array totals</h3><p>The estimate has {TOTAL_PANEL_COUNT} panels before the storm. It has {POST_STORM_PANEL_COUNT} after Rows 1 and 2 are removed.</p></article>
               <article><span>05</span><h3>Estimated rack</h3><p>The rack uses a {TABLE_CHORD_M.toFixed(2)} m slope and {LOW_EDGE_CLEARANCE_M.toFixed(2)}–{HIGH_EDGE_CLEARANCE_M.toFixed(2)} m clearance. Full rows use {RACK_SUPPORTS_PER_ROW} support frames and four rails.</p></article>
+              <article><span>06</span><h3>Recorded wind</h3><p>The sound control uses the CC0 “Steady wind” recording from the USC/Sunset sound-effects collection. Speed controls its gain and playback rate.</p></article>
             </div>
             <div className="modal-caution"><Info size={16} /> Do not use these values for final structural design or manufacturer compliance.</div>
           </section>
@@ -828,188 +829,55 @@ function clampPercent(value: number) {
   return Math.min(100, Math.max(3, value));
 }
 
-type WindAudioGraph = {
-  context: AudioContext;
-  sources: AudioBufferSourceNode[];
-  masterGain: GainNode;
-  bodyGain: GainNode;
-  airGain: GainNode;
-  whooshGain: GainNode;
-  bodyLowpass: BiquadFilterNode;
-  airLowpass: BiquadFilterNode;
-  whooshFilter: BiquadFilterNode;
-  modulationGains: GainNode[];
-  lfos: OscillatorNode[];
-};
-
 function useWindAudio(windSpeedMph: number, ambientTurbulence: number, playing: boolean) {
   const [muted, setMuted] = useState(true);
-  const graphRef = useRef<WindAudioGraph | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
 
-  const createGraph = useCallback(() => {
-    if (graphRef.current) return graphRef.current;
-    if (typeof window === "undefined" || !window.AudioContext) return null;
+  const getAudio = useCallback(() => {
+    if (audioRef.current) return audioRef.current;
+    if (typeof window === "undefined") return null;
 
-    const context = new window.AudioContext();
-    const bufferLength = context.sampleRate * 8;
-    const pinkBuffer = context.createBuffer(1, bufferLength, context.sampleRate);
-    const pinkData = pinkBuffer.getChannelData(0);
-    let b0 = 0;
-    let b1 = 0;
-    let b2 = 0;
-    let b3 = 0;
-    let b4 = 0;
-    let b5 = 0;
-    let b6 = 0;
-    for (let index = 0; index < pinkData.length; index += 1) {
-      const white = Math.random() * 2 - 1;
-      b0 = 0.99886 * b0 + white * 0.0555179;
-      b1 = 0.99332 * b1 + white * 0.0750759;
-      b2 = 0.969 * b2 + white * 0.153852;
-      b3 = 0.8665 * b3 + white * 0.3104856;
-      b4 = 0.55 * b4 + white * 0.5329522;
-      b5 = -0.7616 * b5 - white * 0.016898;
-      pinkData[index] = (b0 + b1 + b2 + b3 + b4 + b5 + b6 + white * 0.5362) * 0.11;
-      b6 = white * 0.115926;
-    }
-
-    const airBuffer = context.createBuffer(1, bufferLength, context.sampleRate);
-    const airData = airBuffer.getChannelData(0);
-    for (let index = 0; index < airData.length; index += 1) {
-      airData[index] = (Math.random() * 2 - 1) * 0.34;
-    }
-
-    const makeSource = (buffer: AudioBuffer, rate: number, offset: number) => {
-      const source = context.createBufferSource();
-      source.buffer = buffer;
-      source.loop = true;
-      source.playbackRate.value = rate;
-      source.start(0, offset);
-      return source;
-    };
-
-    const bodySource = makeSource(pinkBuffer, 0.977, 0.4);
-    const whooshSource = makeSource(airBuffer, 1.013, 3.1);
-    const airSource = makeSource(airBuffer, 0.991, 1.8);
-
-    const bodyHighpass = context.createBiquadFilter();
-    bodyHighpass.type = "highpass";
-    bodyHighpass.frequency.value = 110;
-    const bodyLowpass = context.createBiquadFilter();
-    bodyLowpass.type = "lowpass";
-    bodyLowpass.frequency.value = 1600;
-    bodyLowpass.Q.value = 0.25;
-    const bodyGain = context.createGain();
-    bodyGain.gain.value = 0.5;
-    const bodyPan = context.createStereoPanner();
-    bodyPan.pan.value = -0.12;
-
-    const whooshFilter = context.createBiquadFilter();
-    whooshFilter.type = "bandpass";
-    whooshFilter.frequency.value = 900;
-    whooshFilter.Q.value = 0.68;
-    const whooshGain = context.createGain();
-    whooshGain.gain.value = 0.28;
-    const whooshPan = context.createStereoPanner();
-    whooshPan.pan.value = 0.18;
-
-    const airHighpass = context.createBiquadFilter();
-    airHighpass.type = "highpass";
-    airHighpass.frequency.value = 1200;
-    const airLowpass = context.createBiquadFilter();
-    airLowpass.type = "lowpass";
-    airLowpass.frequency.value = 5200;
-    airLowpass.Q.value = 0.2;
-    const airGain = context.createGain();
-    airGain.gain.value = 0.1;
-    const airPan = context.createStereoPanner();
-    airPan.pan.value = 0.08;
-
-    const masterGain = context.createGain();
-    masterGain.gain.value = 0;
-    const compressor = context.createDynamicsCompressor();
-    compressor.threshold.value = -24;
-    compressor.knee.value = 18;
-    compressor.ratio.value = 3;
-    compressor.attack.value = 0.025;
-    compressor.release.value = 0.2;
-    masterGain.connect(compressor).connect(context.destination);
-
-    bodySource.connect(bodyHighpass).connect(bodyLowpass).connect(bodyGain).connect(bodyPan).connect(masterGain);
-    whooshSource.connect(whooshFilter).connect(whooshGain).connect(whooshPan).connect(masterGain);
-    airSource.connect(airHighpass).connect(airLowpass).connect(airGain).connect(airPan).connect(masterGain);
-
-    const lfos = [context.createOscillator(), context.createOscillator()];
-    const modulationGains = [context.createGain(), context.createGain()];
-    lfos[0].frequency.value = 0.22;
-    lfos[1].frequency.value = 0.39;
-    modulationGains.forEach((gain) => {
-      gain.gain.value = 0;
-    });
-    lfos[0].connect(modulationGains[0]).connect(whooshFilter.frequency);
-    lfos[1].connect(modulationGains[1]).connect(airLowpass.frequency);
-    lfos.forEach((lfo) => {
-      lfo.type = "sine";
-      lfo.start();
-    });
-
-    const graph = {
-      context,
-      sources: [bodySource, whooshSource, airSource],
-      masterGain,
-      bodyGain,
-      airGain,
-      whooshGain,
-      bodyLowpass,
-      airLowpass,
-      whooshFilter,
-      modulationGains,
-      lfos,
-    };
-    graphRef.current = graph;
-    return graph;
+    const audio = new Audio("/audio/wind-loop.mp3");
+    audio.loop = true;
+    audio.preload = "auto";
+    audio.volume = 0;
+    audio.preservesPitch = false;
+    audioRef.current = audio;
+    return audio;
   }, []);
 
   const toggle = useCallback(() => {
     const nextMuted = !muted;
     if (!nextMuted) {
-      const graph = createGraph();
-      if (graph) void graph.context.resume();
+      const audio = getAudio();
+      if (audio && playing) void audio.play().catch(() => undefined);
     }
     setMuted(nextMuted);
-  }, [createGraph, muted]);
+  }, [getAudio, muted, playing]);
 
   useEffect(() => {
-    const graph = graphRef.current;
-    if (!graph) return;
-    const now = graph.context.currentTime;
+    const audio = audioRef.current;
+    if (!audio) return;
     const normalizedSpeed = Math.min(1, Math.max(0, windSpeedMph / 150));
-    const targetGain = muted || !playing
+    const turbulenceBoost = Math.min(0.12, ambientTurbulence / 400);
+    audio.volume = muted || !playing
       ? 0
-      : (0.01 + 0.17 * Math.pow(normalizedSpeed, 1.22)) * (0.94 + ambientTurbulence / 280);
-    graph.masterGain.gain.setTargetAtTime(targetGain, now, 0.08);
-    graph.bodyGain.gain.setTargetAtTime(0.4 + normalizedSpeed * 0.2, now, 0.12);
-    graph.airGain.gain.setTargetAtTime(0.035 + Math.pow(normalizedSpeed, 1.45) * 0.22, now, 0.12);
-    graph.whooshGain.gain.setTargetAtTime(
-      0.2 + normalizedSpeed * 0.13 + ambientTurbulence * 0.0025,
-      now,
-      0.12,
-    );
-    graph.bodyLowpass.frequency.setTargetAtTime(650 + normalizedSpeed * 2200, now, 0.1);
-    graph.airLowpass.frequency.setTargetAtTime(2900 + normalizedSpeed * 4500, now, 0.1);
-    graph.whooshFilter.frequency.setTargetAtTime(480 + normalizedSpeed * 980, now, 0.12);
-    graph.modulationGains[0].gain.setTargetAtTime(70 + ambientTurbulence * 6.5, now, 0.15);
-    graph.modulationGains[1].gain.setTargetAtTime(180 + normalizedSpeed * 520, now, 0.15);
-    graph.lfos[0].frequency.setTargetAtTime(0.18 + normalizedSpeed * 0.1, now, 0.15);
-    graph.lfos[1].frequency.setTargetAtTime(0.31 + normalizedSpeed * 0.14, now, 0.15);
+      : Math.min(0.82, 0.025 + Math.pow(normalizedSpeed, 1.18) * 0.68 + turbulenceBoost);
+    audio.playbackRate = 0.78 + normalizedSpeed * 0.38;
+
+    if (muted || !playing) {
+      audio.pause();
+    } else {
+      void audio.play().catch(() => undefined);
+    }
   }, [ambientTurbulence, muted, playing, windSpeedMph]);
 
   useEffect(() => () => {
-    const graph = graphRef.current;
-    if (!graph) return;
-    graph.sources.forEach((source) => source.stop());
-    graph.lfos.forEach((lfo) => lfo.stop());
-    void graph.context.close();
+    const audio = audioRef.current;
+    if (!audio) return;
+    audio.pause();
+    audio.removeAttribute("src");
+    audio.load();
   }, []);
 
   return { muted, toggle };
