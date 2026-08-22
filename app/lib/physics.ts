@@ -2,7 +2,7 @@ export const ROW_COUNT = 7;
 export const MODULES_PER_ROW = 14;
 export const PANELS_DEEP_PER_ROW = 2;
 export const ROW_COLUMN_COUNTS = [6, 14, 14, 14, 14, 14, 6] as const;
-export const ROW_COLUMN_OFFSETS = [1.5, 0, 0, 0, 0, 0, 4] as const;
+export const ROW_COLUMN_OFFSETS = [4, 0, 0, 0, 0, 0, 4] as const;
 export const ROW_PANEL_COUNTS = ROW_COLUMN_COUNTS.map((columns) => columns * PANELS_DEEP_PER_ROW);
 export const TOTAL_PANEL_COUNT = ROW_PANEL_COUNTS.reduce((total, panels) => total + panels, 0);
 export const POST_STORM_PANEL_COUNT = ROW_PANEL_COUNTS.slice(2).reduce((total, panels) => total + panels, 0);
@@ -10,8 +10,10 @@ export const PANEL_WIDTH_M = 0.992;
 export const PANEL_LENGTH_M = 1.956;
 export const PANEL_THICKNESS_M = 0.04;
 export const PANEL_GAP_M = 0.025;
-export const TABLE_CHORD_M = PANEL_LENGTH_M * PANELS_DEEP_PER_ROW + PANEL_GAP_M;
-export const ROW_SPACING_M = 5.05;
+export const PANEL_SPAN_M = PANEL_LENGTH_M;
+export const PANEL_SLOPE_M = PANEL_WIDTH_M;
+export const TABLE_CHORD_M = PANEL_SLOPE_M * PANELS_DEEP_PER_ROW + PANEL_GAP_M;
+export const ROW_SPACING_M = 4.4;
 export const PANEL_TILT_DEG = 20.1;
 export const LOW_EDGE_CLEARANCE_M = 0.48;
 export const HIGH_EDGE_CLEARANCE_M =
@@ -219,7 +221,7 @@ export function simulate(config: SimulationConfig): SimulationResult {
   const mitigation = getMitigationEffects(config);
 
   // This Strouhal estimate uses one panel chord as the panel-scale wake length.
-  const sheddingFrequencyHz = (0.13 * speedMs) / PANEL_LENGTH_M;
+  const sheddingFrequencyHz = (0.13 * speedMs) / PANEL_SLOPE_M;
   const frequencyRatio = sheddingFrequencyHz / Math.max(0.3, config.panelFrequencyHz);
   const dampingRatio = (config.dampingPercent + mitigation.dampingBoost) / 100;
   const rawDynamicFactor = 1 / Math.sqrt(

@@ -11,10 +11,10 @@ import {
   MODULES_PER_ROW,
   PANEL_GAP_M,
   PANELS_DEEP_PER_ROW,
-  PANEL_LENGTH_M,
+  PANEL_SLOPE_M,
+  PANEL_SPAN_M,
   PANEL_TILT_DEG,
   PANEL_THICKNESS_M,
-  PANEL_WIDTH_M,
   RACK_SUPPORTS_PER_ROW,
   ROW_COLUMN_COUNTS,
   ROW_COLUMN_OFFSETS,
@@ -23,6 +23,7 @@ import {
   ROW_SPACING_M,
   TABLE_CHORD_M,
   circularDifference,
+  getMitigationEffects,
   type SimulationConfig,
   type SimulationResult,
   type ViewMode,
@@ -50,32 +51,41 @@ type PanelVisual = {
   baseRotationX: number;
 };
 
+type FlowSample = {
+  vx: number;
+  vy: number;
+  vz: number;
+  turbulence: number;
+};
+
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
+const approximateGaussian = () =>
+  (Math.random() + Math.random() + Math.random() + Math.random() - 2) * 1.73;
 
 function makePanelTexture(renderer: THREE.WebGLRenderer) {
   const canvas = document.createElement("canvas");
-  canvas.width = 256;
-  canvas.height = 512;
+  canvas.width = 512;
+  canvas.height = 256;
   const context = canvas.getContext("2d");
   if (!context) return null;
-  const gradient = context.createLinearGradient(0, 0, 256, 512);
+  const gradient = context.createLinearGradient(0, 0, 512, 256);
   gradient.addColorStop(0, "#143f55");
   gradient.addColorStop(0.5, "#082634");
   gradient.addColorStop(1, "#0c3447");
   context.fillStyle = gradient;
-  context.fillRect(0, 0, 256, 512);
+  context.fillRect(0, 0, 512, 256);
   context.strokeStyle = "rgba(170, 225, 237, .38)";
   context.lineWidth = 2;
-  for (let column = 1; column < 6; column += 1) {
+  for (let column = 1; column < 12; column += 1) {
     context.beginPath();
-    context.moveTo((column * 256) / 6, 0);
-    context.lineTo((column * 256) / 6, 512);
+    context.moveTo((column * 512) / 12, 0);
+    context.lineTo((column * 512) / 12, 256);
     context.stroke();
   }
-  for (let row = 1; row < 12; row += 1) {
+  for (let row = 1; row < 6; row += 1) {
     context.beginPath();
-    context.moveTo(0, (row * 512) / 12);
-    context.lineTo(256, (row * 512) / 12);
+    context.moveTo(0, (row * 256) / 6);
+    context.lineTo(512, (row * 256) / 6);
     context.stroke();
   }
   const texture = new THREE.CanvasTexture(canvas);
@@ -253,9 +263,15 @@ export function WindScene({
     const tilt = THREE.MathUtils.degToRad(PANEL_TILT_DEG);
     const lowEdgeHeight = LOW_EDGE_CLEARANCE_M;
     const centerHeight = lowEdgeHeight + Math.sin(tilt) * TABLE_CHORD_M * 0.5;
-    const modulePitch = PANEL_WIDTH_M + PANEL_GAP_M;
+    const modulePitch = PANEL_SPAN_M + PANEL_GAP_M;
     const totalWidth = MODULES_PER_ROW * modulePitch - PANEL_GAP_M;
     const tableHorizontalDepth = Math.cos(tilt) * TABLE_CHORD_M;
+    const rowFlowGeometry = ROW_COLUMN_COUNTS.map((columns, index) => ({
+      row: index + 1,
+      z: ((ROW_COUNT - 1) / 2 - index) * ROW_SPACING_M,
+      offsetX: ROW_COLUMN_OFFSETS[index] * modulePitch,
+      width: columns * modulePitch - PANEL_GAP_M,
+    }));
 
     for (let rowIndex = 0; rowIndex < ROW_COUNT; rowIndex += 1) {
       const rowNumber = rowIndex + 1;
@@ -265,7 +281,7 @@ export function WindScene({
       const rowWidth = rowColumns * modulePitch - PANEL_GAP_M;
 
       for (let depthIndex = 0; depthIndex < PANELS_DEEP_PER_ROW; depthIndex += 1) {
-        const panelZ = (depthIndex - (PANELS_DEEP_PER_ROW - 1) / 2) * (PANEL_LENGTH_M + PANEL_GAP_M);
+        const panelZ = (depthIndex - (PANELS_DEEP_PER_ROW - 1) / 2) * (PANEL_SLOPE_M + PANEL_GAP_M);
         for (let moduleIndex = 0; moduleIndex < rowColumns; moduleIndex += 1) {
           const x = rowOffsetX + (moduleIndex - (rowColumns - 1) / 2) * modulePitch;
           const moduleNumber = depthIndex * rowColumns + moduleIndex + 1;
@@ -279,7 +295,7 @@ export function WindScene({
           assembly.userData = { row: rowNumber, module: moduleNumber };
 
           const frame = new THREE.Mesh(
-            new THREE.BoxGeometry(PANEL_WIDTH_M + PANEL_GAP_M, PANEL_THICKNESS_M + 0.035, PANEL_LENGTH_M + PANEL_GAP_M),
+            new THREE.BoxGeometry(PANEL_SPAN_M + PANEL_GAP_M, PANEL_THICKNESS_M + 0.035, PANEL_SLOPE_M + PANEL_GAP_M),
             frameMaterial,
           );
           frame.castShadow = true;
@@ -295,7 +311,7 @@ export function WindScene({
             emissiveIntensity: 0.42,
           });
           const glass = new THREE.Mesh(
-            new THREE.BoxGeometry(PANEL_WIDTH_M - 0.045, PANEL_THICKNESS_M + 0.005, PANEL_LENGTH_M - 0.045),
+            new THREE.BoxGeometry(PANEL_SPAN_M - 0.045, PANEL_THICKNESS_M + 0.005, PANEL_SLOPE_M - 0.045),
             glassMaterial,
           );
           glass.position.y = 0.055;
@@ -490,6 +506,7 @@ export function WindScene({
     const particleCount = 760;
     const particlePositions = new Float32Array(particleCount * 3);
     const particleSeeds = new Float32Array(particleCount);
+    const particleTurbulence = new Float32Array(particleCount * 2);
     for (let index = 0; index < particleCount; index += 1) {
       particlePositions[index * 3] = (Math.random() - 0.5) * 64;
       particlePositions[index * 3 + 1] = 0.35 + Math.random() * 6.2;
@@ -522,7 +539,8 @@ export function WindScene({
         blending: THREE.AdditiveBlending,
       });
       const line = new THREE.Line(geometry, material);
-      line.userData.offset = -14 + lineIndex * 2.8;
+      line.userData.offset = -15 + lineIndex * 3;
+      line.userData.height = [0.26, 0.42, 0.65, 0.9, 1.2, 1.55, 2, 2.6, 3.3, 4.2, 5.3][lineIndex];
       line.userData.seed = Math.random() * Math.PI * 2;
       streamlineGroup.add(line);
       streamlines.push(line);
@@ -577,11 +595,114 @@ export function WindScene({
     const resetParticle = (index: number, flowX: number, flowZ: number) => {
       const transverseX = -flowZ;
       const transverseZ = flowX;
-      const spread = (Math.random() - 0.5) * 61;
-      particlePositions[index * 3] = -flowX * 32 + transverseX * spread;
-      particlePositions[index * 3 + 1] = 0.35 + Math.random() * 6.2;
-      particlePositions[index * 3 + 2] = -flowZ * 32 + transverseZ * spread;
+      const spread = (Math.random() - 0.5) * 66;
+      const upstream = -34 - Math.random() * 2;
+      const layer = Math.random();
+      const height = layer < 0.36
+        ? 0.14 + Math.random() * 0.8
+        : layer < 0.8
+          ? 0.9 + Math.random() * 1.75
+          : 2.7 + Math.random() * 3.7;
+      particlePositions[index * 3] = flowX * upstream + transverseX * spread;
+      particlePositions[index * 3 + 1] = height;
+      particlePositions[index * 3 + 2] = flowZ * upstream + transverseZ * spread;
+      particleTurbulence[index * 2] = 0;
+      particleTurbulence[index * 2 + 1] = 0;
     };
+
+    const sampleFlowField = (
+      x: number,
+      y: number,
+      z: number,
+      phase: number,
+      flowX: number,
+      flowZ: number,
+      visualSpeed: number,
+      elapsed: number,
+      live: typeof liveRef.current,
+      effects: ReturnType<typeof getMitigationEffects>,
+      out: FlowSample,
+    ) => {
+      const crossRowAlignment = Math.abs(flowZ);
+      const flowSign = flowZ >= 0 ? 1 : -1;
+      const transverseX = -flowZ;
+      const transverseZ = flowX;
+      let speedFactor = live.config.mitigation === "screen" ? Math.sqrt(effects.pressureFactor) : 1;
+      let verticalVelocity = 0;
+      let lateralVelocity = 0;
+      let turbulence = (live.config.ambientTurbulence / 100) * 0.55;
+
+      for (const row of rowFlowGeometry) {
+        if (live.showDamage && row.row <= 2) continue;
+        if (Math.abs(x - row.offsetX) > row.width / 2 + 1.25) continue;
+
+        const dz = z - row.z;
+        const downstreamDistance = dz * flowSign;
+        const halfDepth = tableHorizontalDepth / 2;
+        const panelHeight = centerHeight - Math.tan(tilt) * dz;
+        const rowTurbulence = live.result.rows[row.row - 1].turbulencePercent / 100;
+
+        if (Math.abs(dz) <= halfDepth + 0.12) {
+          const abovePanel = y >= panelHeight;
+          const surfaceGap = Math.abs(y - panelHeight);
+          const leadingDistance = downstreamDistance + halfDepth;
+          const leadingPulse = Math.exp(-Math.pow(leadingDistance / 0.38, 2));
+          const followsSlope = -Math.tan(tilt) * flowZ * visualSpeed;
+
+          if (abovePanel) {
+            speedFactor *= 0.96;
+            verticalVelocity += followsSlope * 0.5 + leadingPulse * visualSpeed * crossRowAlignment * 0.14;
+          } else {
+            const localClearance = Math.max(0.16, panelHeight);
+            const contraction = clamp((1.25 - localClearance) / 1.1, 0, 0.68);
+            speedFactor *= 1 + contraction * crossRowAlignment * (flowSign > 0 ? 0.2 : 0.08);
+            verticalVelocity += followsSlope * (flowSign > 0 ? 0.76 : 0.46);
+            turbulence += rowTurbulence * crossRowAlignment * (flowSign > 0 ? 0.08 : 0.14);
+            if (live.config.mitigation === "vanes" && row.row <= live.config.vaneRowCount) {
+              turbulence *= 0.76;
+              lateralVelocity *= 0.62;
+            }
+          }
+
+          if (surfaceGap < 0.2) {
+            const repulsion = (1 - surfaceGap / 0.2) * visualSpeed * 0.58;
+            verticalVelocity += (abovePanel ? 1 : -1) * repulsion;
+            speedFactor *= 0.84 + surfaceGap * 0.6;
+          }
+        }
+
+        const wakeDistance = downstreamDistance - halfDepth;
+        if (wakeDistance > 0 && wakeDistance < ROW_SPACING_M * 1.55) {
+          const wakeDecay = Math.exp(-wakeDistance / (ROW_SPACING_M * 0.9));
+          const wakeStrength = crossRowAlignment * wakeDecay;
+          const vortexPhase =
+            phase + elapsed * (1.15 + visualSpeed * 0.055) + wakeDistance * 2.7 + row.row * 1.23;
+          turbulence += rowTurbulence * wakeStrength * 0.34;
+          speedFactor *= 1 - 0.13 * wakeStrength;
+          lateralVelocity += Math.sin(vortexPhase) * visualSpeed * rowTurbulence * wakeStrength * 0.16;
+          verticalVelocity += Math.cos(vortexPhase * 0.83) * visualSpeed * rowTurbulence * wakeStrength * 0.12;
+
+          if (live.config.mitigation === "spoilers" && row.row <= live.config.spoilerRowCount) {
+            turbulence *= 0.82;
+            verticalVelocity += visualSpeed * wakeStrength * 0.035;
+          }
+        }
+      }
+
+      if (y < 0.24) {
+        verticalVelocity += (1 - y / 0.24) * visualSpeed * 0.28;
+      }
+
+      const localTurbulence = clamp(turbulence * effects.turbulenceFactor, 0.018, 0.46);
+      const localSpeed = visualSpeed * clamp(speedFactor, 0.5, 1.34);
+      out.vx = flowX * localSpeed + transverseX * lateralVelocity;
+      out.vy = verticalVelocity;
+      out.vz = flowZ * localSpeed + transverseZ * lateralVelocity;
+      out.turbulence = localTurbulence;
+    };
+
+    const particleFlowSample: FlowSample = { vx: 0, vy: 0, vz: 0, turbulence: 0 };
+    const streamlineFlowSample: FlowSample = { vx: 0, vy: 0, vz: 0, turbulence: 0 };
 
     const animate = () => {
       const delta = Math.min(clock.getDelta(), 0.04);
@@ -593,7 +714,8 @@ export function WindScene({
       const flowLength = Math.hypot(flowX, flowZ) || 1;
       const normalizedFlowX = flowX / flowLength;
       const normalizedFlowZ = flowZ / flowLength;
-      const windMotion = live.config.windSpeedMph * 0.085;
+      const visualSpeed = live.config.windSpeedMph * 0.44704 * 0.19;
+      const mitigationEffects = getMitigationEffects(live.config);
 
       if (live.cameraRequest !== lastCameraRequest) {
         setCamera(live.cameraView);
@@ -696,19 +818,69 @@ export function WindScene({
       if (live.playing) {
         for (let index = 0; index < particleCount; index += 1) {
           const offset = index * 3;
-          const x = particlePositions[offset];
-          const z = particlePositions[offset + 2];
-          const progress = normalizedFlowZ >= 0 ? clamp((z + 18) / 36, 0, 1) : clamp((18 - z) / 36, 0, 1);
-          const inWake = Math.abs(x) < totalWidth * 0.62 && Math.abs(z) < 18;
-          const wake = inWake ? (0.18 + progress * 0.92) * live.config.ambientTurbulence * 0.028 : 0.04;
-          particlePositions[offset] += normalizedFlowX * windMotion * delta + Math.sin(elapsed * 2.4 + particleSeeds[index]) * wake * delta;
-          particlePositions[offset + 2] += normalizedFlowZ * windMotion * delta + Math.cos(elapsed * 2.1 + particleSeeds[index]) * wake * delta;
-          particlePositions[offset + 1] += Math.sin(elapsed * 3.2 + particleSeeds[index] * 2) * wake * delta;
+          const turbulenceOffset = index * 2;
+          const oldX = particlePositions[offset];
+          const oldY = particlePositions[offset + 1];
+          const oldZ = particlePositions[offset + 2];
+          sampleFlowField(
+            oldX,
+            oldY,
+            oldZ,
+            particleSeeds[index],
+            normalizedFlowX,
+            normalizedFlowZ,
+            visualSpeed,
+            elapsed,
+            live,
+            mitigationEffects,
+            particleFlowSample,
+          );
+
+          const correlationTime = 0.34 + oldY * 0.045;
+          const decay = Math.exp(-delta / correlationTime);
+          const turbulenceScale =
+            visualSpeed * particleFlowSample.turbulence * Math.sqrt(1 - decay * decay) * 0.52;
+          particleTurbulence[turbulenceOffset] =
+            particleTurbulence[turbulenceOffset] * decay + approximateGaussian() * turbulenceScale;
+          particleTurbulence[turbulenceOffset + 1] =
+            particleTurbulence[turbulenceOffset + 1] * decay + approximateGaussian() * turbulenceScale * 0.62;
+
+          const transverseX = -normalizedFlowZ;
+          const transverseZ = normalizedFlowX;
+          const newX =
+            oldX +
+            (particleFlowSample.vx + transverseX * particleTurbulence[turbulenceOffset]) * delta;
+          const newZ =
+            oldZ +
+            (particleFlowSample.vz + transverseZ * particleTurbulence[turbulenceOffset]) * delta;
+          let newY =
+            oldY + (particleFlowSample.vy + particleTurbulence[turbulenceOffset + 1]) * delta;
+
+          for (const row of rowFlowGeometry) {
+            if (live.showDamage && row.row <= 2) continue;
+            if (Math.abs(newX - row.offsetX) > row.width / 2) continue;
+            const newDz = newZ - row.z;
+            if (Math.abs(newDz) > tableHorizontalDepth / 2) continue;
+            const oldPanelHeight = centerHeight - Math.tan(tilt) * (oldZ - row.z);
+            const newPanelHeight = centerHeight - Math.tan(tilt) * newDz;
+            const crossedPanel = (oldY - oldPanelHeight) * (newY - newPanelHeight) <= 0;
+            if (crossedPanel || Math.abs(newY - newPanelHeight) < 0.1) {
+              const side = oldY >= oldPanelHeight ? 1 : -1;
+              newY = newPanelHeight + side * 0.105;
+              particleTurbulence[turbulenceOffset + 1] *= -0.18;
+            }
+          }
+
+          particlePositions[offset] = newX;
+          particlePositions[offset + 1] = Math.max(0.1, newY);
+          particlePositions[offset + 2] = newZ;
+          const streamwisePosition = newX * normalizedFlowX + newZ * normalizedFlowZ;
+          const transversePosition = newX * transverseX + newZ * transverseZ;
           if (
-            Math.abs(particlePositions[offset]) > 35 ||
-            Math.abs(particlePositions[offset + 2]) > 34 ||
-            particlePositions[offset + 1] < 0.18 ||
-            particlePositions[offset + 1] > 8
+            streamwisePosition > 36 ||
+            Math.abs(transversePosition) > 36 ||
+            particlePositions[offset + 1] < 0.095 ||
+            particlePositions[offset + 1] > 8.5
           ) {
             resetParticle(index, normalizedFlowX, normalizedFlowZ);
           }
@@ -725,14 +897,38 @@ export function WindScene({
         const positions = attribute.array as Float32Array;
         const transverseX = -normalizedFlowZ;
         const transverseZ = normalizedFlowX;
+        let traceX = normalizedFlowX * -32 + transverseX * line.userData.offset;
+        let traceY = line.userData.height;
+        let traceZ = normalizedFlowZ * -32 + transverseZ * line.userData.offset;
         for (let point = 0; point < 52; point += 1) {
-          const distance = -31 + point * (62 / 51);
-          const progress = point / 51;
-          const wake = Math.pow(progress, 1.8) * live.config.ambientTurbulence * 0.045;
-          const wave = Math.sin(elapsed * 2.2 + point * 0.24 + line.userData.seed) * wake;
-          positions[point * 3] = normalizedFlowX * distance + transverseX * (line.userData.offset + wave);
-          positions[point * 3 + 1] = 1.05 + (line.userData.offset % 4) * 0.3 + Math.cos(elapsed * 2.7 + point * 0.3) * wake * 0.48;
-          positions[point * 3 + 2] = normalizedFlowZ * distance + transverseZ * (line.userData.offset + wave);
+          positions[point * 3] = traceX;
+          positions[point * 3 + 1] = traceY;
+          positions[point * 3 + 2] = traceZ;
+          sampleFlowField(
+            traceX,
+            traceY,
+            traceZ,
+            line.userData.seed,
+            normalizedFlowX,
+            normalizedFlowZ,
+            Math.max(visualSpeed, 0.1),
+            elapsed,
+            live,
+            mitigationEffects,
+            streamlineFlowSample,
+          );
+          const horizontalSpeed = Math.max(
+            0.1,
+            Math.hypot(streamlineFlowSample.vx, streamlineFlowSample.vz),
+          );
+          const stepLength = 1.28;
+          traceX += (streamlineFlowSample.vx / horizontalSpeed) * stepLength;
+          traceZ += (streamlineFlowSample.vz / horizontalSpeed) * stepLength;
+          traceY = clamp(
+            traceY + (streamlineFlowSample.vy / horizontalSpeed) * stepLength,
+            0.12,
+            7.5,
+          );
         }
         attribute.needsUpdate = true;
       }
@@ -780,7 +976,7 @@ export function WindScene({
   return (
     <div className="wind-scene" ref={hostRef}>
       <div className="scene-corner scene-location">
-        <span className="scene-kicker">PHOTO COUNT · R1 6 · R2–6 14 · R7 6 COLUMNS · {PANEL_TILT_DEG.toFixed(1)}° TILT</span>
+        <span className="scene-kicker">LANDSCAPE MODULES · R1/R7 SOUTHEAST ALIGNED · {PANEL_TILT_DEG.toFixed(1)}° TILT</span>
         <strong>20.130687° N, 155.881243° W</strong>
         <span>58-1200 Akoni Pule Hwy · Kohala</span>
       </div>
