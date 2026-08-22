@@ -1,16 +1,23 @@
 export const ROW_COUNT = 7;
-export const MODULES_PER_ROW = 20;
+export const MODULES_PER_ROW = 14;
 export const PANELS_DEEP_PER_ROW = 2;
 export const PANEL_WIDTH_M = 0.992;
 export const PANEL_LENGTH_M = 1.956;
 export const PANEL_THICKNESS_M = 0.04;
-export const TABLE_CHORD_M = PANEL_LENGTH_M * PANELS_DEEP_PER_ROW + 0.055;
+export const PANEL_GAP_M = 0.025;
+export const TABLE_CHORD_M = PANEL_LENGTH_M * PANELS_DEEP_PER_ROW + PANEL_GAP_M;
 export const ROW_SPACING_M = 5.05;
+export const PANEL_TILT_DEG = 20.1;
+export const LOW_EDGE_CLEARANCE_M = 0.48;
+export const HIGH_EDGE_CLEARANCE_M =
+  LOW_EDGE_CLEARANCE_M + Math.sin((PANEL_TILT_DEG * Math.PI) / 180) * TABLE_CHORD_M;
+export const RACK_SUPPORTS_PER_ROW = 5;
 export const ARRAY_AXIS_BEARING = 135;
 export const MAUKA_BEARING = 45;
 
 export type ViewMode = "flow" | "pressure" | "vibration";
 export type MitigationId = "none" | "screen" | "vanes" | "spoilers" | "dampers";
+export type SpoilerStyle = "perforated" | "continuous" | "tabs";
 
 export type SimulationConfig = {
   windSpeedMph: number;
@@ -19,6 +26,18 @@ export type SimulationConfig = {
   panelFrequencyHz: number;
   dampingPercent: number;
   mitigation: MitigationId;
+  screenPorosity: number;
+  screenHeightM: number;
+  screenProtectedRows: number;
+  vaneLengthM: number;
+  vaneRowCount: number;
+  spoilerStyle: SpoilerStyle;
+  spoilerHeightM: number;
+  spoilerAngleDeg: number;
+  spoilerRowCount: number;
+  damperSpacingM: number;
+  damperDampingPercent: number;
+  damperRowCount: number;
 };
 
 export type RowResult = {
@@ -45,47 +64,42 @@ export type SimulationResult = {
 
 export const MITIGATIONS: Record<
   MitigationId,
-  { label: string; short: string; detail: string; turbulenceFactor: number; pressureFactor: number; dampingBoost: number }
+  { label: string; short: string; detail: string; color: string; colorName: string }
 > = {
   none: {
     label: "Baseline array",
     short: "No intervention",
     detail: "Current open-rack geometry with no added flow control.",
-    turbulenceFactor: 1,
-    pressureFactor: 1,
-    dampingBoost: 0,
+    color: "#8fa4aa",
+    colorName: "gray",
   },
   screen: {
-    label: "40% porous screen",
+    label: "Porous wind screen",
     short: "Mauka perimeter",
-    detail: "A porous screen reduces the incoming gust without creating a solid-wall wake.",
-    turbulenceFactor: 0.86,
-    pressureFactor: 0.9,
-    dampingBoost: 0,
+    detail: "A porous mauka screen reduces the incoming gust. Adjust its open area and height.",
+    color: "#7df0c5",
+    colorName: "green",
   },
   vanes: {
     label: "Under-panel vanes",
     short: "Rows 1–3",
-    detail: "Short splitter vanes limit underside crossflow and wake interaction near the front rows.",
-    turbulenceFactor: 0.72,
-    pressureFactor: 0.91,
-    dampingBoost: 0,
+    detail: "Splitter vanes organize underside flow. They can cover the rack or extend toward the row behind it.",
+    color: "#5ddcff",
+    colorName: "cyan",
   },
   spoilers: {
-    label: "Front-edge spoilers",
+    label: "Front-edge deflectors",
     short: "Rows 1–2",
-    detail: "Small perforated deflectors change separation at the downstream front edge.",
-    turbulenceFactor: 0.82,
-    pressureFactor: 0.78,
-    dampingBoost: 0,
+    detail: "A bright edge device changes flow separation. Compare a perforated strip, solid strip, or spaced tabs.",
+    color: "#ff9b57",
+    colorName: "orange",
   },
   dampers: {
-    label: "Rail dampers",
+    label: "Rail vibration dampers",
     short: "Rows 1–2",
-    detail: "Elastomer rail dampers add system damping without changing the airflow field.",
-    turbulenceFactor: 1,
-    pressureFactor: 1,
-    dampingBoost: 5.5,
+    detail: "Elastomer pads at rail-to-rack joints absorb motion. They do not change the airflow field.",
+    color: "#ff66d8",
+    colorName: "magenta",
   },
 };
 
@@ -124,6 +138,62 @@ export type ScenarioId = keyof typeof SCENARIOS;
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
+export function getMitigationEffects(config: SimulationConfig) {
+  if (config.mitigation === "screen") {
+    const porosity = clamp(config.screenPorosity, 20, 80);
+    const solidity = 1 - porosity / 100;
+    const heightFactor = clamp(config.screenHeightM / 2.2, 0.35, 1.45);
+    const coverageFactor = 0.55 + 0.45 * clamp(config.screenProtectedRows / ROW_COUNT, 1 / ROW_COUNT, 1);
+    const pressureFactor = clamp(1 - 0.17 * solidity * heightFactor * coverageFactor, 0.78, 0.98);
+    const offDesignPenalty = Math.abs(porosity - 40) * 0.003;
+    const turbulenceFactor = clamp(1 - (0.1 + 0.04 * heightFactor - offDesignPenalty) * coverageFactor, 0.78, 1.05);
+    return { turbulenceFactor, pressureFactor, dampingBoost: 0 };
+  }
+
+  if (config.mitigation === "vanes") {
+    const lengthRatio = clamp(config.vaneLengthM / TABLE_CHORD_M, 0.1, 1.5);
+    const rackCoverage = Math.min(lengthRatio, 1);
+    const extension = Math.max(lengthRatio - 1, 0);
+    const rowCoverage = clamp(0.5 + 0.5 * (config.vaneRowCount / 3), 0.55, 1.35);
+    return {
+      turbulenceFactor: clamp(1 - (0.28 * rackCoverage + 0.05 * extension) * rowCoverage, 0.62, 0.97),
+      pressureFactor: clamp(1 - (0.09 * rackCoverage + 0.03 * extension) * rowCoverage, 0.84, 0.99),
+      dampingBoost: 0,
+    };
+  }
+
+  if (config.mitigation === "spoilers") {
+    const styleTarget = {
+      perforated: { turbulence: 0.82, pressure: 0.78 },
+      continuous: { turbulence: 0.78, pressure: 0.72 },
+      tabs: { turbulence: 0.87, pressure: 0.84 },
+    }[config.spoilerStyle];
+    const heightFactor = clamp(config.spoilerHeightM / 0.3, 0.35, 1.7);
+    const angleFactor = clamp(Math.cos(THREE_DEGREES_TO_RADIANS * (config.spoilerAngleDeg - 20)), 0.35, 1);
+    const rowCoverage = clamp(0.62 + 0.38 * (config.spoilerRowCount / 2), 0.62, 1.55);
+    const effectiveness = clamp(heightFactor * angleFactor * rowCoverage, 0.25, 1.45);
+    return {
+      turbulenceFactor: clamp(1 - (1 - styleTarget.turbulence) * effectiveness, 0.65, 0.97),
+      pressureFactor: clamp(1 - (1 - styleTarget.pressure) * effectiveness, 0.62, 0.97),
+      dampingBoost: 0,
+    };
+  }
+
+  if (config.mitigation === "dampers") {
+    const spacingFactor = clamp(2 / config.damperSpacingM, 0.5, 2.5);
+    const rowCoverage = clamp(0.72 + 0.28 * (config.damperRowCount / 2), 0.72, 1.7);
+    return {
+      turbulenceFactor: 1,
+      pressureFactor: 1,
+      dampingBoost: clamp(config.damperDampingPercent * spacingFactor * rowCoverage, 0.5, 18),
+    };
+  }
+
+  return { turbulenceFactor: 1, pressureFactor: 1, dampingBoost: 0 };
+}
+
+const THREE_DEGREES_TO_RADIANS = Math.PI / 180;
+
 export function circularDifference(a: number, b: number) {
   return ((a - b + 540) % 360) - 180;
 }
@@ -141,7 +211,7 @@ export function simulate(config: SimulationConfig): SimulationResult {
   const crossRowAlignment = Math.abs(maukaAlignment);
   const alignmentPercent = crossRowAlignment * 100;
   const flowFromMauka = maukaAlignment >= 0;
-  const mitigation = MITIGATIONS[config.mitigation];
+  const mitigation = getMitigationEffects(config);
 
   // This Strouhal estimate uses one panel chord as the panel-scale wake length.
   const sheddingFrequencyHz = (0.13 * speedMs) / PANEL_LENGTH_M;

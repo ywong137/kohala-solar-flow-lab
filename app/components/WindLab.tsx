@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity,
   ArrowDownRight,
@@ -22,26 +22,34 @@ import {
   Shield,
   SlidersHorizontal,
   Sparkles,
+  Volume2,
+  VolumeX,
   Wind,
   X,
 } from "lucide-react";
 import { WindScene } from "./WindScene";
 import {
   MAUKA_BEARING,
+  HIGH_EDGE_CLEARANCE_M,
+  LOW_EDGE_CLEARANCE_M,
   MITIGATIONS,
   MODULES_PER_ROW,
   PANEL_LENGTH_M,
+  PANEL_TILT_DEG,
   PANEL_WIDTH_M,
   PANELS_DEEP_PER_ROW,
+  RACK_SUPPORTS_PER_ROW,
   ROW_COUNT,
   ROW_SPACING_M,
   SCENARIOS,
+  TABLE_CHORD_M,
   cardinalDirection,
   riskColor,
   simulate,
   type MitigationId,
   type ScenarioId,
   type SimulationConfig,
+  type SpoilerStyle,
   type ViewMode,
 } from "../lib/physics";
 
@@ -63,15 +71,28 @@ export function WindLab() {
   const [panelFrequencyHz, setPanelFrequencyHz] = useState(2.4);
   const [dampingPercent, setDampingPercent] = useState(2.5);
   const [mitigation, setMitigation] = useState<MitigationId>("none");
+  const [screenPorosity, setScreenPorosity] = useState(40);
+  const [screenHeightM, setScreenHeightM] = useState(2.2);
+  const [screenProtectedRows, setScreenProtectedRows] = useState(7);
+  const [vaneLengthM, setVaneLengthM] = useState(Number(TABLE_CHORD_M.toFixed(2)));
+  const [vaneRowCount, setVaneRowCount] = useState(3);
+  const [spoilerStyle, setSpoilerStyle] = useState<SpoilerStyle>("perforated");
+  const [spoilerHeightM, setSpoilerHeightM] = useState(0.3);
+  const [spoilerAngleDeg, setSpoilerAngleDeg] = useState(20);
+  const [spoilerRowCount, setSpoilerRowCount] = useState(2);
+  const [damperSpacingM, setDamperSpacingM] = useState(2);
+  const [damperDampingPercent, setDamperDampingPercent] = useState(5.5);
+  const [damperRowCount, setDamperRowCount] = useState(2);
   const [viewMode, setViewMode] = useState<ViewMode>("flow");
   const [playing, setPlaying] = useState(true);
   const [showDamage, setShowDamage] = useState(false);
   const [cameraView, setCameraView] = useState<"perspective" | "mauka" | "makai" | "plan">("perspective");
   const [cameraRequest, setCameraRequest] = useState(0);
-  const [selectedPanel, setSelectedPanel] = useState({ row: 1, module: 30 });
+  const [selectedPanel, setSelectedPanel] = useState({ row: 1, module: 21 });
   const [showComparison, setShowComparison] = useState(false);
   const [showEvidence, setShowEvidence] = useState(false);
   const [showAssumptions, setShowAssumptions] = useState(false);
+  const windAudio = useWindAudio(windSpeedMph, ambientTurbulence, playing);
 
   const config: SimulationConfig = useMemo(
     () => ({
@@ -81,8 +102,39 @@ export function WindLab() {
       panelFrequencyHz,
       dampingPercent,
       mitigation,
+      screenPorosity,
+      screenHeightM,
+      screenProtectedRows,
+      vaneLengthM,
+      vaneRowCount,
+      spoilerStyle,
+      spoilerHeightM,
+      spoilerAngleDeg,
+      spoilerRowCount,
+      damperSpacingM,
+      damperDampingPercent,
+      damperRowCount,
     }),
-    [windSpeedMph, windBearing, ambientTurbulence, panelFrequencyHz, dampingPercent, mitigation],
+    [
+      windSpeedMph,
+      windBearing,
+      ambientTurbulence,
+      panelFrequencyHz,
+      dampingPercent,
+      mitigation,
+      screenPorosity,
+      screenHeightM,
+      screenProtectedRows,
+      vaneLengthM,
+      vaneRowCount,
+      spoilerStyle,
+      spoilerHeightM,
+      spoilerAngleDeg,
+      spoilerRowCount,
+      damperSpacingM,
+      damperDampingPercent,
+      damperRowCount,
+    ],
   );
   const result = useMemo(() => simulate(config), [config]);
   const selectedResult = result.rows[selectedPanel.row - 1];
@@ -110,6 +162,18 @@ export function WindLab() {
     setPanelFrequencyHz(2.4);
     setDampingPercent(2.5);
     setMitigation("none");
+    setScreenPorosity(40);
+    setScreenHeightM(2.2);
+    setScreenProtectedRows(7);
+    setVaneLengthM(Number(TABLE_CHORD_M.toFixed(2)));
+    setVaneRowCount(3);
+    setSpoilerStyle("perforated");
+    setSpoilerHeightM(0.3);
+    setSpoilerAngleDeg(20);
+    setSpoilerRowCount(2);
+    setDamperSpacingM(2);
+    setDamperDampingPercent(5.5);
+    setDamperRowCount(2);
     setShowDamage(false);
     setViewMode("flow");
     setCamera("perspective");
@@ -189,6 +253,14 @@ export function WindLab() {
               <button className="icon-button" onClick={() => setPlaying((value) => !value)} aria-label={playing ? "Pause airflow" : "Play airflow"}>
                 {playing ? <Pause size={14} /> : <Play size={14} />}
               </button>
+              <button
+                className={`icon-button wind-sound-button ${windAudio.muted ? "" : "active"}`}
+                onClick={windAudio.toggle}
+                aria-label={windAudio.muted ? "Enable wind sound" : "Mute wind sound"}
+                title={windAudio.muted ? "Enable wind sound" : "Mute wind sound"}
+              >
+                {windAudio.muted ? <VolumeX size={14} /> : <Volume2 size={14} />}
+              </button>
             </div>
           </div>
 
@@ -203,6 +275,19 @@ export function WindLab() {
             selectedPanel={selectedPanel}
             onSelectPanel={setSelectedPanel}
           />
+
+          {mitigation !== "none" ? (
+            <div
+              className="mitigation-visual-key"
+              style={{ "--concept-accent": MITIGATIONS[mitigation].color } as React.CSSProperties}
+            >
+              <i />
+              <span>
+                <strong>{MITIGATIONS[mitigation].label}</strong>
+                Bright {MITIGATIONS[mitigation].colorName} geometry in the model
+              </span>
+            </div>
+          ) : null}
 
           <div className="wind-compass-card">
             <div className="mini-compass" aria-hidden="true">
@@ -346,6 +431,7 @@ export function WindLab() {
                   className={mitigation === id ? "active" : ""}
                   key={id}
                   onClick={() => setMitigation(id)}
+                  style={{ "--concept-accent": item.color } as React.CSSProperties}
                 >
                   <Icon size={17} />
                   <span>{item.label}</span>
@@ -355,6 +441,183 @@ export function WindLab() {
             })}
           </div>
           <p className="concept-note">{MITIGATIONS[mitigation].detail}</p>
+
+          {mitigation !== "none" ? (
+            <div
+              className="mitigation-tuning"
+              style={{ "--concept-accent": MITIGATIONS[mitigation].color } as React.CSSProperties}
+            >
+              <div className="tuning-heading">
+                <span><i /> Visible concept controls</span>
+                <small>{MITIGATIONS[mitigation].colorName}</small>
+              </div>
+
+              {mitigation === "screen" ? (
+                <>
+                  <ControlSlider
+                    label="Screen porosity"
+                    value={screenPorosity}
+                    min={20}
+                    max={80}
+                    step={1}
+                    unit="% open"
+                    onChange={setScreenPorosity}
+                    accent={MITIGATIONS.screen.color}
+                    compact
+                  />
+                  <ControlSlider
+                    label="Screen height"
+                    value={screenHeightM}
+                    min={0.8}
+                    max={3.2}
+                    step={0.1}
+                    unit="m"
+                    onChange={setScreenHeightM}
+                    accent={MITIGATIONS.screen.color}
+                    compact
+                  />
+                  <ControlSlider
+                    label="Rows protected"
+                    value={screenProtectedRows}
+                    min={1}
+                    max={ROW_COUNT}
+                    step={1}
+                    unit="rows"
+                    onChange={setScreenProtectedRows}
+                    accent={MITIGATIONS.screen.color}
+                    compact
+                  />
+                  <p>{screenPorosity}% of the screen area is open. Coverage starts at Row 1.</p>
+                </>
+              ) : null}
+
+              {mitigation === "vanes" ? (
+                <>
+                  <ControlSlider
+                    label="Vane length"
+                    value={vaneLengthM}
+                    min={0.5}
+                    max={5.5}
+                    step={0.05}
+                    unit="m"
+                    onChange={setVaneLengthM}
+                    accent={MITIGATIONS.vanes.color}
+                    compact
+                  />
+                  <ControlSlider
+                    label="Rows fitted"
+                    value={vaneRowCount}
+                    min={1}
+                    max={ROW_COUNT}
+                    step={1}
+                    unit="rows"
+                    onChange={setVaneRowCount}
+                    accent={MITIGATIONS.vanes.color}
+                    compact
+                  />
+                  <p>
+                    {vaneLengthM <= TABLE_CHORD_M
+                      ? `${Math.round((vaneLengthM / TABLE_CHORD_M) * 100)}% of the ${TABLE_CHORD_M.toFixed(2)} m rack slope.`
+                      : `${(vaneLengthM - TABLE_CHORD_M).toFixed(2)} m beyond the rack toward the row behind it.`}
+                  </p>
+                </>
+              ) : null}
+
+              {mitigation === "spoilers" ? (
+                <>
+                  <span className="option-label">Deflector form</span>
+                  <div className="spoiler-options" role="group" aria-label="Front-edge deflector form">
+                    {([
+                      ["perforated", "Perforated"],
+                      ["continuous", "Solid"],
+                      ["tabs", "Tabs"],
+                    ] as const).map(([id, label]) => (
+                      <button
+                        className={spoilerStyle === id ? "active" : ""}
+                        key={id}
+                        onClick={() => setSpoilerStyle(id)}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                  <ControlSlider
+                    label="Deflector height"
+                    value={spoilerHeightM}
+                    min={0.1}
+                    max={0.7}
+                    step={0.05}
+                    unit="m"
+                    onChange={setSpoilerHeightM}
+                    accent={MITIGATIONS.spoilers.color}
+                    compact
+                  />
+                  <ControlSlider
+                    label="Deflector angle"
+                    value={spoilerAngleDeg}
+                    min={-30}
+                    max={60}
+                    step={5}
+                    unit="°"
+                    onChange={setSpoilerAngleDeg}
+                    accent={MITIGATIONS.spoilers.color}
+                    compact
+                  />
+                  <ControlSlider
+                    label="Rows fitted"
+                    value={spoilerRowCount}
+                    min={1}
+                    max={ROW_COUNT}
+                    step={1}
+                    unit="rows"
+                    onChange={setSpoilerRowCount}
+                    accent={MITIGATIONS.spoilers.color}
+                    compact
+                  />
+                  <p>The device sits on the makai edge. Coverage starts at Row 1.</p>
+                </>
+              ) : null}
+
+              {mitigation === "dampers" ? (
+                <>
+                  <ControlSlider
+                    label="Damper spacing"
+                    value={damperSpacingM}
+                    min={0.8}
+                    max={4}
+                    step={0.1}
+                    unit="m"
+                    onChange={setDamperSpacingM}
+                    accent={MITIGATIONS.dampers.color}
+                    compact
+                  />
+                  <ControlSlider
+                    label="Added damping"
+                    value={damperDampingPercent}
+                    min={1}
+                    max={10}
+                    step={0.5}
+                    unit="%"
+                    onChange={setDamperDampingPercent}
+                    accent={MITIGATIONS.dampers.color}
+                    compact
+                  />
+                  <ControlSlider
+                    label="Rows fitted"
+                    value={damperRowCount}
+                    min={1}
+                    max={ROW_COUNT}
+                    step={1}
+                    unit="rows"
+                    onChange={setDamperRowCount}
+                    accent={MITIGATIONS.dampers.color}
+                    compact
+                  />
+                  <p>Magenta rings mark elastomer pads at rail-to-rack joints.</p>
+                </>
+              ) : null}
+            </div>
+          ) : null}
 
           <button className="compare-button" onClick={() => setShowComparison(true)}>
             <BarChart3 size={16} />
@@ -414,8 +677,8 @@ export function WindLab() {
       </section>
 
       <footer className="lab-footer">
-        <span><span className="status-dot" /> SITE CALIBRATION V0.1</span>
-        <span>JINKO 365 W · {PANEL_LENGTH_M.toFixed(3)} × {PANEL_WIDTH_M.toFixed(3)} m · {PANELS_DEEP_PER_ROW}-DEEP TABLE</span>
+        <span><span className="status-dot" /> SITE CALIBRATION V0.2 · PHOTO ESTIMATE</span>
+        <span>JINKO 365 W · {PANEL_LENGTH_M.toFixed(3)} × {PANEL_WIDTH_M.toFixed(3)} m · {PANEL_TILT_DEG.toFixed(1)}° TILT</span>
         <span>{ROW_COUNT} ROWS · {MODULES_PER_ROW * PANELS_DEEP_PER_ROW} PANELS / ROW · {ROW_SPACING_M.toFixed(2)} m PITCH</span>
       </footer>
 
@@ -468,7 +731,7 @@ export function WindLab() {
               <figure>
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src="/reference/satellite.png" alt="Satellite view of the facility and the large solar array" />
-                <figcaption><strong>North-up site view</strong><span>Large array · rows run northwest to southeast</span></figcaption>
+                <figcaption><strong>North-up site view</strong><span>Large array · 14 columns × 2 panels estimated per row</span></figcaption>
               </figure>
               <figure>
                 {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -485,16 +748,16 @@ export function WindLab() {
           <section className="modal assumptions-modal" role="dialog" aria-modal="true" aria-label="Model assumptions" onMouseDown={(event) => event.stopPropagation()}>
             <div className="modal-head">
               <div>
-                <span className="eyebrow">MODEL BASIS · V0.1</span>
+                <span className="eyebrow">MODEL BASIS · V0.2</span>
                 <h2>What this model can test</h2>
               </div>
               <button className="icon-button" onClick={() => setShowAssumptions(false)} aria-label="Close assumptions"><X size={18} /></button>
             </div>
             <div className="assumption-grid">
-              <article><span>01</span><h3>Geometry</h3><p>Seven rack rows use 40 Jinko panels per row. Each rack has two panels along its slope.</p></article>
+              <article><span>01</span><h3>Photo-counted geometry</h3><p>Seven rows use an estimated 14 columns × 2 panels. This gives 28 panels per row and 196 before the storm.</p></article>
               <article><span>02</span><h3>Flow response</h3><p>The solver adds panel-row wakes along the wind path. It predicts relative pressure and turbulence, not full CFD.</p></article>
               <article><span>03</span><h3>Vibration</h3><p>The model compares a panel-scale shedding estimate with an adjustable natural frequency and damping ratio.</p></article>
-              <article><span>04</span><h3>Next calibration</h3><p>Add exact row pitch, tilt, column count, rail spans, fastener details, and measured modal frequencies.</p></article>
+              <article><span>04</span><h3>Estimated rack</h3><p>{PANEL_TILT_DEG.toFixed(1)}° latitude tilt, {TABLE_CHORD_M.toFixed(2)} m slope, {LOW_EDGE_CLEARANCE_M.toFixed(2)}–{HIGH_EDGE_CLEARANCE_M.toFixed(2)} m clearance, {RACK_SUPPORTS_PER_ROW} support frames, and four rails.</p></article>
             </div>
             <div className="modal-caution"><Info size={16} /> Do not use these values for final structural design or manufacturer compliance.</div>
           </section>
@@ -539,9 +802,11 @@ function ControlSlider({
   compact?: boolean;
 }) {
   const percent = ((value - min) / (max - min)) * 100;
+  const decimalPlaces = step >= 1 ? 0 : Math.min(2, (step.toString().split(".")[1] ?? "").length);
+  const displayValue = value.toFixed(decimalPlaces);
   return (
     <label className={`control-slider ${compact ? "compact" : ""}`}>
-      <span><span>{label}</span><strong>{value}<small>{unit}</small></strong></span>
+      <span><span>{label}</span><strong>{displayValue}<small>{unit}</small></strong></span>
       <input
         type="range"
         min={min}
@@ -558,4 +823,94 @@ function ControlSlider({
 
 function clampPercent(value: number) {
   return Math.min(100, Math.max(3, value));
+}
+
+type WindAudioGraph = {
+  context: AudioContext;
+  source: AudioBufferSourceNode;
+  outputGain: GainNode;
+  gustGain: GainNode;
+  lowpass: BiquadFilterNode;
+  lfo: OscillatorNode;
+};
+
+function useWindAudio(windSpeedMph: number, ambientTurbulence: number, playing: boolean) {
+  const [muted, setMuted] = useState(true);
+  const graphRef = useRef<WindAudioGraph | null>(null);
+
+  const createGraph = useCallback(() => {
+    if (graphRef.current) return graphRef.current;
+    if (typeof window === "undefined" || !window.AudioContext) return null;
+
+    const context = new window.AudioContext();
+    const buffer = context.createBuffer(1, context.sampleRate * 4, context.sampleRate);
+    const data = buffer.getChannelData(0);
+    let previous = 0;
+    for (let index = 0; index < data.length; index += 1) {
+      const white = Math.random() * 2 - 1;
+      previous = (previous + white * 0.035) / 1.035;
+      data[index] = previous * 3.2;
+    }
+
+    const source = context.createBufferSource();
+    source.buffer = buffer;
+    source.loop = true;
+
+    const highpass = context.createBiquadFilter();
+    highpass.type = "highpass";
+    highpass.frequency.value = 75;
+    const lowpass = context.createBiquadFilter();
+    lowpass.type = "lowpass";
+    lowpass.frequency.value = 900;
+    lowpass.Q.value = 0.72;
+    const outputGain = context.createGain();
+    outputGain.gain.value = 0;
+
+    const lfo = context.createOscillator();
+    lfo.type = "sine";
+    lfo.frequency.value = 0.22;
+    const gustGain = context.createGain();
+    gustGain.gain.value = 0;
+
+    source.connect(highpass).connect(lowpass).connect(outputGain).connect(context.destination);
+    lfo.connect(gustGain).connect(outputGain.gain);
+    source.start();
+    lfo.start();
+
+    const graph = { context, source, outputGain, gustGain, lowpass, lfo };
+    graphRef.current = graph;
+    return graph;
+  }, []);
+
+  const toggle = useCallback(() => {
+    const nextMuted = !muted;
+    if (!nextMuted) {
+      const graph = createGraph();
+      if (graph) void graph.context.resume();
+    }
+    setMuted(nextMuted);
+  }, [createGraph, muted]);
+
+  useEffect(() => {
+    const graph = graphRef.current;
+    if (!graph) return;
+    const now = graph.context.currentTime;
+    const normalizedSpeed = Math.min(1, Math.max(0, windSpeedMph / 150));
+    const turbulenceGain = 0.82 + Math.min(35, ambientTurbulence) / 100;
+    const targetGain = muted || !playing ? 0 : (0.008 + 0.2 * Math.pow(normalizedSpeed, 1.4)) * turbulenceGain;
+    graph.outputGain.gain.setTargetAtTime(targetGain, now, 0.09);
+    graph.gustGain.gain.setTargetAtTime(targetGain * (0.12 + ambientTurbulence / 90), now, 0.14);
+    graph.lowpass.frequency.setTargetAtTime(420 + normalizedSpeed * 3100, now, 0.12);
+    graph.lfo.frequency.setTargetAtTime(0.1 + normalizedSpeed * 0.34, now, 0.15);
+  }, [ambientTurbulence, muted, playing, windSpeedMph]);
+
+  useEffect(() => () => {
+    const graph = graphRef.current;
+    if (!graph) return;
+    graph.source.stop();
+    graph.lfo.stop();
+    void graph.context.close();
+  }, []);
+
+  return { muted, toggle };
 }

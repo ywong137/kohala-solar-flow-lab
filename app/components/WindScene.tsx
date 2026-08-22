@@ -5,13 +5,17 @@ import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import {
   ARRAY_AXIS_BEARING,
+  LOW_EDGE_CLEARANCE_M,
   MAUKA_BEARING,
   MITIGATIONS,
   MODULES_PER_ROW,
+  PANEL_GAP_M,
   PANELS_DEEP_PER_ROW,
   PANEL_LENGTH_M,
+  PANEL_TILT_DEG,
   PANEL_THICKNESS_M,
   PANEL_WIDTH_M,
+  RACK_SUPPORTS_PER_ROW,
   ROW_COUNT,
   ROW_SPACING_M,
   TABLE_CHORD_M,
@@ -243,18 +247,19 @@ export function WindScene({
     const panelTexture = makePanelTexture(renderer);
     const frameMaterial = new THREE.MeshStandardMaterial({ color: 0x9aa9a8, metalness: 0.82, roughness: 0.26 });
     const rackMaterial = new THREE.MeshStandardMaterial({ color: 0x758482, metalness: 0.88, roughness: 0.3 });
-    const tilt = THREE.MathUtils.degToRad(14);
-    const lowEdgeHeight = 0.58;
+    const tilt = THREE.MathUtils.degToRad(PANEL_TILT_DEG);
+    const lowEdgeHeight = LOW_EDGE_CLEARANCE_M;
     const centerHeight = lowEdgeHeight + Math.sin(tilt) * TABLE_CHORD_M * 0.5;
-    const modulePitch = PANEL_WIDTH_M + 0.055;
-    const totalWidth = MODULES_PER_ROW * modulePitch - 0.055;
+    const modulePitch = PANEL_WIDTH_M + PANEL_GAP_M;
+    const totalWidth = MODULES_PER_ROW * modulePitch - PANEL_GAP_M;
+    const tableHorizontalDepth = Math.cos(tilt) * TABLE_CHORD_M;
 
     for (let rowIndex = 0; rowIndex < ROW_COUNT; rowIndex += 1) {
       const rowNumber = rowIndex + 1;
       const z = ((ROW_COUNT - 1) / 2 - rowIndex) * ROW_SPACING_M;
 
       for (let depthIndex = 0; depthIndex < PANELS_DEEP_PER_ROW; depthIndex += 1) {
-        const panelZ = (depthIndex - (PANELS_DEEP_PER_ROW - 1) / 2) * (PANEL_LENGTH_M + 0.055);
+        const panelZ = (depthIndex - (PANELS_DEEP_PER_ROW - 1) / 2) * (PANEL_LENGTH_M + PANEL_GAP_M);
         for (let moduleIndex = 0; moduleIndex < MODULES_PER_ROW; moduleIndex += 1) {
           const x = (moduleIndex - (MODULES_PER_ROW - 1) / 2) * modulePitch;
           const moduleNumber = depthIndex * MODULES_PER_ROW + moduleIndex + 1;
@@ -267,8 +272,8 @@ export function WindScene({
           assembly.rotation.x = tilt;
           assembly.userData = { row: rowNumber, module: moduleNumber };
 
-        const frame = new THREE.Mesh(
-            new THREE.BoxGeometry(PANEL_WIDTH_M + 0.055, PANEL_THICKNESS_M + 0.035, PANEL_LENGTH_M + 0.055),
+          const frame = new THREE.Mesh(
+            new THREE.BoxGeometry(PANEL_WIDTH_M + PANEL_GAP_M, PANEL_THICKNESS_M + 0.035, PANEL_LENGTH_M + PANEL_GAP_M),
             frameMaterial,
           );
           frame.castShadow = true;
@@ -298,7 +303,7 @@ export function WindScene({
         }
       }
 
-      for (const railZ of [-TABLE_CHORD_M * 0.31, TABLE_CHORD_M * 0.31]) {
+      for (const railZ of [-TABLE_CHORD_M * 0.39, -TABLE_CHORD_M * 0.13, TABLE_CHORD_M * 0.13, TABLE_CHORD_M * 0.39]) {
         const railHeight = centerHeight - Math.sin(tilt) * railZ - 0.12;
         const rail = new THREE.Mesh(new THREE.BoxGeometry(totalWidth + 0.1, 0.08, 0.09), rackMaterial);
         rail.position.set(0, railHeight, z + railZ);
@@ -306,8 +311,8 @@ export function WindScene({
         arrayGroup.add(rail);
       }
 
-      for (let support = 0; support < 6; support += 1) {
-        const x = -totalWidth / 2 + 0.8 + support * ((totalWidth - 1.6) / 5);
+      for (let support = 0; support < RACK_SUPPORTS_PER_ROW; support += 1) {
+        const x = -totalWidth / 2 + 0.65 + support * ((totalWidth - 1.3) / (RACK_SUPPORTS_PER_ROW - 1));
         const postTop = new THREE.Vector3(x, centerHeight - 0.12, z - 0.15);
         const post = makeBeam(new THREE.Vector3(x, 0.08, z - 0.15), postTop, 0.045, rackMaterial);
         const brace = makeBeam(new THREE.Vector3(x, 0.08, z + 1.42), postTop, 0.038, rackMaterial);
@@ -336,54 +341,127 @@ export function WindScene({
     scene.add(bearingDisc);
 
     const mitigationGroups: Record<string, THREE.Group> = {};
-    const mitigationMaterial = new THREE.MeshStandardMaterial({ color: 0x7df0c5, metalness: 0.25, roughness: 0.5, emissive: 0x173c31, emissiveIntensity: 0.7 });
+    const screenMaterial = new THREE.MeshStandardMaterial({
+      color: 0x7df0c5,
+      metalness: 0.2,
+      roughness: 0.38,
+      emissive: 0x1e8f6b,
+      emissiveIntensity: 1.3,
+    });
+    const vaneMaterial = new THREE.MeshStandardMaterial({
+      color: 0x5ddcff,
+      metalness: 0.25,
+      roughness: 0.32,
+      emissive: 0x176f91,
+      emissiveIntensity: 1.45,
+    });
+    const spoilerMaterial = new THREE.MeshStandardMaterial({
+      color: 0xff9b57,
+      metalness: 0.2,
+      roughness: 0.36,
+      emissive: 0x9a3d0a,
+      emissiveIntensity: 1.55,
+    });
+    const damperMaterial = new THREE.MeshStandardMaterial({
+      color: 0xff66d8,
+      roughness: 0.3,
+      emissive: 0xc40083,
+      emissiveIntensity: 2.4,
+    });
+
     const screenGroup = new THREE.Group();
-    for (let post = 0; post < 13; post += 1) {
-      const x = -14.2 + post * 2.36;
-      const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 2.8, 8), rackMaterial);
-      pole.position.set(x, 1.4, -20.2);
+    const screenPosts: THREE.Mesh[] = [];
+    const screenSlats: THREE.Mesh[] = [];
+    const screenZ = -((ROW_COUNT - 1) / 2) * ROW_SPACING_M - 4.5;
+    for (let post = 0; post < 9; post += 1) {
+      const x = -totalWidth / 2 - 0.7 + post * ((totalWidth + 1.4) / 8);
+      const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.055, 1, 10), screenMaterial);
+      pole.position.set(x, 1.1, screenZ);
       screenGroup.add(pole);
+      screenPosts.push(pole);
     }
-    for (let strip = 0; strip < 6; strip += 1) {
-      const slat = new THREE.Mesh(new THREE.BoxGeometry(28.4, 0.13, 0.05), mitigationMaterial);
-      slat.position.set(0, 0.35 + strip * 0.45, -20.2);
+    for (let strip = 0; strip < 12; strip += 1) {
+      const slat = new THREE.Mesh(new THREE.BoxGeometry(totalWidth + 1.4, 1, 0.075), screenMaterial);
+      slat.position.set(0, 0.2 + strip * 0.18, screenZ);
       screenGroup.add(slat);
+      screenSlats.push(slat);
     }
     scene.add(screenGroup);
     mitigationGroups.screen = screenGroup;
 
     const vaneGroup = new THREE.Group();
-    for (let row = 1; row <= 3; row += 1) {
+    const vaneVisuals: THREE.Mesh[] = [];
+    for (let row = 1; row <= ROW_COUNT; row += 1) {
       const z = ((ROW_COUNT - 1) / 2 - (row - 1)) * ROW_SPACING_M;
-      for (let vane = 0; vane < 9; vane += 1) {
-        const fin = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.68, 1.5), mitigationMaterial);
-        fin.position.set(-9.8 + vane * 2.45, 0.42, z);
+      for (let vane = 0; vane < 7; vane += 1) {
+        const fin = new THREE.Mesh(new THREE.BoxGeometry(0.075, 0.72, 1), vaneMaterial);
+        fin.position.set(-totalWidth / 2 + 0.7 + vane * ((totalWidth - 1.4) / 6), 0.43, z);
+        fin.userData.rowZ = z;
+        fin.userData.row = row;
         vaneGroup.add(fin);
+        vaneVisuals.push(fin);
       }
     }
     scene.add(vaneGroup);
     mitigationGroups.vanes = vaneGroup;
 
     const spoilerGroup = new THREE.Group();
-    for (let row = 1; row <= 2; row += 1) {
-      const z = ((ROW_COUNT - 1) / 2 - (row - 1)) * ROW_SPACING_M + 1.26;
-      const spoiler = new THREE.Mesh(new THREE.BoxGeometry(totalWidth, 0.36, 0.08), mitigationMaterial);
-      spoiler.position.set(0, 0.5, z);
-      spoiler.rotation.x = -0.24;
-      spoilerGroup.add(spoiler);
+    const spoilerStyleGroups: Record<SimulationConfig["spoilerStyle"], THREE.Group> = {
+      perforated: new THREE.Group(),
+      continuous: new THREE.Group(),
+      tabs: new THREE.Group(),
+    };
+    const spoilerVisuals: THREE.Mesh[] = [];
+    Object.values(spoilerStyleGroups).forEach((group) => spoilerGroup.add(group));
+    for (let row = 1; row <= ROW_COUNT; row += 1) {
+      const edgeZ = ((ROW_COUNT - 1) / 2 - (row - 1)) * ROW_SPACING_M + tableHorizontalDepth / 2;
+      const continuous = new THREE.Mesh(new THREE.BoxGeometry(totalWidth, 1, 0.075), spoilerMaterial);
+      continuous.position.set(0, lowEdgeHeight + 0.15, edgeZ);
+      continuous.userData.row = row;
+      spoilerStyleGroups.continuous.add(continuous);
+      spoilerVisuals.push(continuous);
+
+      for (let moduleIndex = 0; moduleIndex < MODULES_PER_ROW; moduleIndex += 1) {
+        const x = (moduleIndex - (MODULES_PER_ROW - 1) / 2) * modulePitch;
+        const perforated = new THREE.Mesh(new THREE.BoxGeometry(modulePitch * 0.62, 1, 0.075), spoilerMaterial);
+        perforated.position.set(x, lowEdgeHeight + 0.15, edgeZ);
+        perforated.userData.row = row;
+        spoilerStyleGroups.perforated.add(perforated);
+        spoilerVisuals.push(perforated);
+
+        const tab = new THREE.Mesh(new THREE.BoxGeometry(modulePitch * 0.42, 1, 0.095), spoilerMaterial);
+        tab.position.set(x, lowEdgeHeight + 0.15, edgeZ);
+        tab.userData.angleOffset = moduleIndex % 2 === 0 ? -6 : 6;
+        tab.userData.row = row;
+        spoilerStyleGroups.tabs.add(tab);
+        spoilerVisuals.push(tab);
+      }
     }
     scene.add(spoilerGroup);
     mitigationGroups.spoilers = spoilerGroup;
 
     const damperGroup = new THREE.Group();
-    const damperMaterial = new THREE.MeshStandardMaterial({ color: 0xffa85a, roughness: 0.72, emissive: 0x5c2205, emissiveIntensity: 0.55 });
-    for (let row = 1; row <= 2; row += 1) {
+    const damperSets: Array<{ row: number; meshes: THREE.Mesh[] }> = [];
+    const damperGlows: THREE.PointLight[] = [];
+    const maxDampersPerRail = Math.ceil(totalWidth / 0.8) + 1;
+    for (let row = 1; row <= ROW_COUNT; row += 1) {
       const z = ((ROW_COUNT - 1) / 2 - (row - 1)) * ROW_SPACING_M;
-      for (let damper = 0; damper < 8; damper += 1) {
-        const pad = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.15, 0.18, 12), damperMaterial);
-        pad.position.set(-9 + damper * 2.6, 0.77, z);
-        damperGroup.add(pad);
+      for (const railZ of [-TABLE_CHORD_M * 0.39, -TABLE_CHORD_M * 0.13, TABLE_CHORD_M * 0.13, TABLE_CHORD_M * 0.39]) {
+        const set: THREE.Mesh[] = [];
+        const railHeight = centerHeight - Math.sin(tilt) * railZ - 0.12;
+        for (let damper = 0; damper < maxDampersPerRail; damper += 1) {
+          const ring = new THREE.Mesh(new THREE.TorusGeometry(0.14, 0.052, 10, 18), damperMaterial);
+          ring.rotation.y = Math.PI / 2;
+          ring.position.set(0, railHeight, z + railZ);
+          damperGroup.add(ring);
+          set.push(ring);
+        }
+        damperSets.push({ row, meshes: set });
       }
+      const glow = new THREE.PointLight(0xff3fc8, 1.9, 8, 2);
+      glow.position.set(0, 1.15, z);
+      damperGroup.add(glow);
+      damperGlows.push(glow);
     }
     scene.add(damperGroup);
     mitigationGroups.dampers = damperGroup;
@@ -501,7 +579,27 @@ export function WindScene({
         lastCameraRequest = live.cameraRequest;
       }
 
-      const visualKey = `${live.viewMode}-${live.result.peakUpliftKpa.toFixed(3)}-${live.result.vibrationIndex.toFixed(1)}-${live.showDamage}-${live.config.mitigation}-${live.selectedPanel.row}-${live.selectedPanel.module}`;
+      const visualKey = [
+        live.viewMode,
+        live.result.peakUpliftKpa.toFixed(3),
+        live.result.vibrationIndex.toFixed(1),
+        live.showDamage,
+        live.config.mitigation,
+        live.config.screenPorosity,
+        live.config.screenHeightM,
+        live.config.screenProtectedRows,
+        live.config.vaneLengthM,
+        live.config.vaneRowCount,
+        live.config.spoilerStyle,
+        live.config.spoilerHeightM,
+        live.config.spoilerAngleDeg,
+        live.config.spoilerRowCount,
+        live.config.damperSpacingM,
+        live.config.damperDampingPercent,
+        live.config.damperRowCount,
+        live.selectedPanel.row,
+        live.selectedPanel.module,
+      ].join("-");
       if (visualKey !== lastVisualKey) {
         const maxPressure = Math.max(...live.result.rows.map((row) => row.peakUpliftKpa), 0.01);
         for (const panel of panelVisuals) {
@@ -518,6 +616,51 @@ export function WindScene({
           panel.glass.material.emissiveIntensity = selected ? 1.25 : live.viewMode === "flow" ? 0.32 : 0.66;
           panel.assembly.visible = !(live.showDamage && panel.row <= 2);
         }
+
+        const screenHeight = live.config.screenHeightM;
+        const screenCellHeight = screenHeight / screenSlats.length;
+        const screenSolidHeight = screenCellHeight * (1 - live.config.screenPorosity / 100);
+        screenPosts.forEach((post) => {
+          post.scale.y = screenHeight;
+          post.position.y = screenHeight / 2;
+        });
+        screenSlats.forEach((slat, index) => {
+          slat.scale.y = Math.max(0.015, screenSolidHeight);
+          slat.position.y = (index + 0.5) * screenCellHeight;
+        });
+
+        for (const vane of vaneVisuals) {
+          vane.scale.z = live.config.vaneLengthM;
+          vane.position.z = vane.userData.rowZ + tableHorizontalDepth / 2 - live.config.vaneLengthM / 2;
+          vane.visible = vane.userData.row <= live.config.vaneRowCount;
+        }
+
+        Object.entries(spoilerStyleGroups).forEach(([style, group]) => {
+          group.visible = style === live.config.spoilerStyle;
+        });
+        for (const spoiler of spoilerVisuals) {
+          spoiler.scale.y = live.config.spoilerHeightM;
+          spoiler.position.y = lowEdgeHeight + live.config.spoilerHeightM / 2;
+          spoiler.rotation.x = THREE.MathUtils.degToRad(
+            -live.config.spoilerAngleDeg + (spoiler.userData.angleOffset ?? 0),
+          );
+          spoiler.visible = spoiler.userData.row <= live.config.spoilerRowCount;
+        }
+
+        const damperCount = clamp(Math.ceil(totalWidth / live.config.damperSpacingM) + 1, 2, maxDampersPerRail);
+        const damperScale = 0.86 + live.config.damperDampingPercent * 0.035;
+        for (const set of damperSets) {
+          set.meshes.forEach((damper, index) => {
+            damper.visible = set.row <= live.config.damperRowCount && index < damperCount;
+            damper.position.x = -totalWidth / 2 + index * (totalWidth / Math.max(1, damperCount - 1));
+            damper.scale.setScalar(damperScale);
+          });
+        }
+        damperGlows.forEach((glow, index) => {
+          glow.visible = index < live.config.damperRowCount;
+          glow.intensity = 1.1 + live.config.damperDampingPercent * 0.15;
+        });
+
         Object.entries(mitigationGroups).forEach(([id, group]) => {
           group.visible = live.config.mitigation === id;
         });
@@ -611,7 +754,7 @@ export function WindScene({
   return (
     <div className="wind-scene" ref={hostRef}>
       <div className="scene-corner scene-location">
-        <span className="scene-kicker">SITE MODEL · EST. GEOMETRY</span>
+        <span className="scene-kicker">SITE MODEL · 14 × 2 PHOTO COUNT · {PANEL_TILT_DEG.toFixed(1)}° TILT</span>
         <strong>20.130687° N, 155.881243° W</strong>
         <span>58-1200 Akoni Pule Hwy · Kohala</span>
       </div>
