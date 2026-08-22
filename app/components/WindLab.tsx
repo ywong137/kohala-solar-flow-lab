@@ -659,11 +659,12 @@ export function WindLab() {
           <div className="selected-panel-card">
             <div className="selected-panel-head">
               <div>
-                <span className="eyebrow">SELECTED PANEL</span>
+                <span className="eyebrow selection-eyebrow"><i /> ACTIVE SELECTION</span>
                 <strong>Row {selectedPanel.row} · Panel {selectedPanel.module}</strong>
               </div>
               <CircleGauge size={20} style={{ color: riskColor(selectedResult.vibrationIndex) }} />
             </div>
+            <div className="selected-panel-key"><i /> Yellow outline and label in the 3D view</div>
             <div className="selected-values">
               <span><small>Peak</small><strong>{selectedResult.peakUpliftKpa.toFixed(2)} kPa</strong></span>
               <span><small>Turbulence</small><strong>{selectedResult.turbulencePercent.toFixed(0)}%</strong></span>

@@ -118,20 +118,32 @@ function makeGroundTexture(renderer: THREE.WebGLRenderer) {
   return texture;
 }
 
-function makeTextSprite(text: string, accent = false) {
+type TextSpriteStyle = "default" | "accent" | "selection";
+
+function makeTextSprite(text: string, style: TextSpriteStyle = "default") {
   const canvas = document.createElement("canvas");
   canvas.width = 512;
   canvas.height = 128;
   const context = canvas.getContext("2d");
   if (!context) return new THREE.Sprite();
-  context.fillStyle = accent ? "rgba(119, 246, 197, .92)" : "rgba(7, 17, 24, .82)";
+  const accent = style === "accent";
+  const selection = style === "selection";
+  context.fillStyle = selection
+    ? "rgba(255, 231, 106, .96)"
+    : accent
+      ? "rgba(119, 246, 197, .92)"
+      : "rgba(7, 17, 24, .82)";
   context.beginPath();
   context.roundRect(8, 8, 496, 112, 20);
   context.fill();
-  context.strokeStyle = accent ? "rgba(215, 255, 240, .8)" : "rgba(134, 211, 230, .45)";
+  context.strokeStyle = selection
+    ? "rgba(255, 250, 206, .96)"
+    : accent
+      ? "rgba(215, 255, 240, .8)"
+      : "rgba(134, 211, 230, .45)";
   context.lineWidth = 3;
   context.stroke();
-  context.fillStyle = accent ? "#07130f" : "#dffaff";
+  context.fillStyle = selection || accent ? "#07130f" : "#dffaff";
   context.font = "600 42px Arial";
   context.textAlign = "center";
   context.textBaseline = "middle";
@@ -357,12 +369,47 @@ export function WindScene({
       arrayGroup.add(label);
     }
 
-    const maukaLabel = makeTextSprite("MAUKA · NE · UPWIND", true);
+    const maukaLabel = makeTextSprite("MAUKA · NE · UPWIND", "accent");
     maukaLabel.position.set(arrayCenterX, 1.8, -28.5);
     scene.add(maukaLabel);
     const makaiLabel = makeTextSprite("MAKAI · SW · DOWNWIND");
     makaiLabel.position.set(arrayCenterX, 1.8, 28.5);
     scene.add(makaiLabel);
+
+    const selectionMaterial = new THREE.MeshBasicMaterial({
+      color: 0xffe76a,
+      transparent: true,
+      opacity: 0.96,
+      depthTest: false,
+    });
+    const selectionMarker = new THREE.Group();
+    const selectionBorderThickness = 0.055;
+    const selectionBorderHeight = 0.035;
+    for (const z of [-PANEL_SLOPE_M / 2 - 0.055, PANEL_SLOPE_M / 2 + 0.055]) {
+      const border = new THREE.Mesh(
+        new THREE.BoxGeometry(PANEL_SPAN_M + 0.18, selectionBorderHeight, selectionBorderThickness),
+        selectionMaterial,
+      );
+      border.position.z = z;
+      border.renderOrder = 30;
+      selectionMarker.add(border);
+    }
+    for (const x of [-PANEL_SPAN_M / 2 - 0.055, PANEL_SPAN_M / 2 + 0.055]) {
+      const border = new THREE.Mesh(
+        new THREE.BoxGeometry(selectionBorderThickness, selectionBorderHeight, PANEL_SLOPE_M + 0.18),
+        selectionMaterial,
+      );
+      border.position.x = x;
+      border.renderOrder = 30;
+      selectionMarker.add(border);
+    }
+    const selectionTag = makeTextSprite("SELECTED PANEL", "selection");
+    selectionTag.position.set(0, 1.15, 0);
+    selectionTag.scale.set(3.9, 0.98, 1);
+    selectionTag.renderOrder = 31;
+    selectionMarker.add(selectionTag);
+    selectionMarker.visible = false;
+    scene.add(selectionMarker);
 
     const directionMaterial = new THREE.MeshStandardMaterial({ color: 0x8bf2c9, emissive: 0x245e4b, emissiveIntensity: 1.1 });
     const maukaArrow = new THREE.ArrowHelper(new THREE.Vector3(0, 0, 1), new THREE.Vector3(14, 0.15, -22), 8, 0x7ff1c4, 1.2, 0.7);
@@ -753,6 +800,7 @@ export function WindScene({
       ].join("-");
       if (visualKey !== lastVisualKey) {
         const maxPressure = Math.max(...live.result.rows.map((row) => row.peakUpliftKpa), 0.01);
+        let activePanel: PanelVisual | null = null;
         for (const panel of panelVisuals) {
           const rowResult = live.result.rows[panel.row - 1];
           const selected = panel.row === live.selectedPanel.row && panel.module === live.selectedPanel.module;
@@ -763,9 +811,18 @@ export function WindScene({
               : 0.12;
           const color = new THREE.Color().setHSL(0.54 * (1 - clamp(risk, 0, 1)), 0.82, 0.43 + risk * 0.08);
           panel.glass.material.color.copy(color);
-          panel.glass.material.emissive.copy(selected ? new THREE.Color(0x7df0c5) : color.clone().multiplyScalar(0.19));
-          panel.glass.material.emissiveIntensity = selected ? 1.25 : live.viewMode === "flow" ? 0.32 : 0.66;
+          panel.glass.material.emissive.copy(selected ? new THREE.Color(0xffd84f) : color.clone().multiplyScalar(0.19));
+          panel.glass.material.emissiveIntensity = selected ? 2.1 : live.viewMode === "flow" ? 0.32 : 0.66;
           panel.assembly.visible = !(live.showDamage && panel.row <= 2);
+          if (selected && panel.assembly.visible) activePanel = panel;
+        }
+        if (activePanel) {
+          activePanel.assembly.add(selectionMarker);
+          selectionMarker.position.set(0, 0.14, 0);
+          selectionMarker.rotation.set(0, 0, 0);
+          selectionMarker.visible = true;
+        } else {
+          selectionMarker.visible = false;
         }
 
         const screenHeight = live.config.screenHeightM;
@@ -942,6 +999,9 @@ export function WindScene({
       }
 
       const vibrationScale = live.viewMode === "vibration" && live.playing ? 1 : 0;
+      const selectionPulse = 1 + Math.sin(elapsed * 3.2) * 0.025;
+      selectionMarker.scale.setScalar(selectionPulse);
+      selectionMaterial.opacity = 0.86 + Math.sin(elapsed * 3.2) * 0.1;
       for (const panel of panelVisuals) {
         const rowResult = live.result.rows[panel.row - 1];
         const amplitude = vibrationScale * rowResult.vibrationIndex * 0.00011;
