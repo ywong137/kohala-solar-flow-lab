@@ -46,12 +46,12 @@ type PanelVisual = {
   immediatePosition: THREE.Vector3;
   immediateRotation: THREE.Euler;
   immediateDamaged: boolean;
+  immediatePresent: boolean;
   crack?: THREE.Mesh;
 };
 
 type RackVisual = {
   object: THREE.Object3D;
-  row: number;
   basePosition: THREE.Vector3;
   baseQuaternion: THREE.Quaternion;
 };
@@ -333,35 +333,65 @@ export function WindScene({
     sky.position.y = 14;
     scene.add(sky);
 
-    const fieldTexture = makeFieldTexture(renderer);
-    const field = new THREE.Mesh(
-      new THREE.PlaneGeometry(240, 155),
-      new THREE.MeshStandardMaterial({ map: fieldTexture, color: 0x9a8c51, roughness: 1 }),
-    );
-    field.rotation.x = -Math.PI / 2;
-    field.position.set(arrayCenterX, -0.09, -23);
-    field.receiveShadow = true;
-    scene.add(field);
-
     const groundTexture = makeGroundTexture(renderer);
+    const fieldTexture = makeFieldTexture(renderer);
     const gravelDepth = (rowCount - 1) * rowSpacingM + tableChordM + 12;
     const gravelCenterZ = 0.8;
     const gravelMinX = arrayBounds.minX - 7;
     const wallX = arrayBounds.maxX + 3;
     const gravelWidth = wallX - gravelMinX;
     const gravelCenterX = (gravelMinX + wallX) / 2;
-    const wallHeight = 0.86;
+    const gravelMinZ = gravelCenterZ - gravelDepth / 2;
+    const gravelMaxZ = gravelCenterZ + gravelDepth / 2;
     const wallDepth = gravelDepth + 3;
     const wallMinZ = gravelCenterZ - wallDepth / 2;
-    const retainedHillWidth = 78;
-    const retainedHillDepth = wallDepth + 62;
-    const retainedHillCenterX = wallX + retainedHillWidth / 2 + 0.12;
-    const retainedHillCenterZ = gravelCenterZ - 10;
-    const retainedHillHeightAt = (x: number, z: number) => {
-      const progress = clamp((x - wallX) / retainedHillWidth, 0, 1);
-      const undulation = progress * (Math.sin(z * 0.16) * 0.13 + Math.sin(x * 0.11 + z * 0.07) * 0.09);
-      return wallHeight + 0.05 + progress * 4.7 + undulation;
+    const wallMaxZ = gravelCenterZ + wallDepth / 2;
+    const retainedHillWidth = 84;
+    const wallTopHeightAt = (z: number) => {
+      const rearProgress = clamp((wallMaxZ - z) / wallDepth, 0, 1);
+      return 0.62 + rearProgress * 0.5;
     };
+    const retainedHillHeightAt = (x: number, z: number) => {
+      const crossProgress = clamp((x - wallX) / retainedHillWidth, 0, 1);
+      const rearProgress = clamp((wallMaxZ - z) / wallDepth, 0, 1);
+      const roundedRise = Math.sin(crossProgress * Math.PI) * (1.25 + rearProgress * 0.48);
+      const crown = Math.sin(rearProgress * Math.PI) * 0.18;
+      const undulation = Math.sin(z * 0.16) * 0.07 + Math.sin(x * 0.11 + z * 0.07) * 0.05;
+      return wallTopHeightAt(z) + roundedRise + crown + crossProgress * 0.14 + undulation * crossProgress;
+    };
+    const siteTerrainHeightAt = (x: number, z: number) => {
+      const leftDrop = Math.max(0, gravelMinX - x) * 0.042;
+      const makaiDrop = Math.max(0, z - gravelMaxZ) * 0.055;
+      const maukaRise = Math.max(0, gravelMinZ - z) * 0.006;
+      const lowerSlope = -0.08 - leftDrop - makaiDrop + maukaRise;
+      if (x <= wallX) return lowerSlope;
+
+      const endDistance = z < wallMinZ ? wallMinZ - z : z > wallMaxZ ? z - wallMaxZ : 0;
+      const wallInfluence = Math.exp(-Math.pow(endDistance / 15, 2));
+      return THREE.MathUtils.lerp(lowerSlope, retainedHillHeightAt(x, z), wallInfluence);
+    };
+
+    const fieldWidth = 240;
+    const fieldDepth = 155;
+    const fieldCenterZ = -23;
+    const fieldGeometry = new THREE.PlaneGeometry(fieldWidth, fieldDepth, 48, 42);
+    const fieldPositions = fieldGeometry.attributes.position as THREE.BufferAttribute;
+    for (let index = 0; index < fieldPositions.count; index += 1) {
+      const worldX = arrayCenterX + fieldPositions.getX(index);
+      const worldZ = fieldCenterZ - fieldPositions.getY(index);
+      fieldPositions.setZ(index, siteTerrainHeightAt(worldX, worldZ));
+    }
+    fieldPositions.needsUpdate = true;
+    fieldGeometry.computeVertexNormals();
+    const field = new THREE.Mesh(
+      fieldGeometry,
+      new THREE.MeshStandardMaterial({ map: fieldTexture, color: 0x91854c, roughness: 1 }),
+    );
+    field.rotation.x = -Math.PI / 2;
+    field.position.set(arrayCenterX, 0, fieldCenterZ);
+    field.receiveShadow = true;
+    scene.add(field);
+
     const ground = new THREE.Mesh(
       new THREE.PlaneGeometry(gravelWidth, gravelDepth, 1, 1),
       new THREE.MeshStandardMaterial({ map: groundTexture, color: 0x5a615d, roughness: 0.99, metalness: 0.01 }),
@@ -370,26 +400,6 @@ export function WindScene({
     ground.position.set(gravelCenterX, -0.035, gravelCenterZ);
     ground.receiveShadow = true;
     scene.add(ground);
-
-    const retainedHillGeometry = new THREE.PlaneGeometry(retainedHillWidth, retainedHillDepth, 30, 34);
-    const retainedHillPositions = retainedHillGeometry.attributes.position as THREE.BufferAttribute;
-    for (let index = 0; index < retainedHillPositions.count; index += 1) {
-      const localX = retainedHillPositions.getX(index);
-      const localY = retainedHillPositions.getY(index);
-      const worldX = retainedHillCenterX + localX;
-      const worldZ = retainedHillCenterZ - localY;
-      retainedHillPositions.setZ(index, retainedHillHeightAt(worldX, worldZ));
-    }
-    retainedHillPositions.needsUpdate = true;
-    retainedHillGeometry.computeVertexNormals();
-    const retainedHill = new THREE.Mesh(
-      retainedHillGeometry,
-      new THREE.MeshStandardMaterial({ map: fieldTexture, color: 0x8a814b, roughness: 1 }),
-    );
-    retainedHill.rotation.x = -Math.PI / 2;
-    retainedHill.position.set(retainedHillCenterX, 0, retainedHillCenterZ);
-    retainedHill.receiveShadow = true;
-    scene.add(retainedHill);
 
     const ocean = new THREE.Mesh(
       new THREE.PlaneGeometry(260, 92),
@@ -422,69 +432,39 @@ export function WindScene({
       tree.add(trunk, canopy);
       const treeX = arrayCenterX + side * (32 + hash(index + 810) * 63);
       const treeZ = -62 + hash(index + 850) * 96;
-      const treeY = treeX > wallX ? retainedHillHeightAt(treeX, treeZ) : -0.02;
+      const treeY = siteTerrainHeightAt(treeX, treeZ);
       tree.position.set(treeX, treeY, treeZ);
       scene.add(tree);
     }
 
-    const frontRowHorizontalDepth = Math.cos(tilt) * (
-      geometry.rows[0].panelsDeep * panelSlopeM + (geometry.rows[0].panelsDeep - 1) * panelGapM
-    );
-    const rockMaterial = new THREE.MeshStandardMaterial({ color: 0x3b352e, roughness: 1 });
-    const rockGeometry = new THREE.DodecahedronGeometry(0.42, 0);
-    const stonesPerLayer = Math.ceil(wallDepth / 0.52);
-    const rockCount = stonesPerLayer * 3;
+    const rockMaterial = new THREE.MeshStandardMaterial({ color: 0x4a3025, roughness: 1 });
+    const rockGeometry = new THREE.DodecahedronGeometry(0.33, 0);
+    const wallColumns = Math.ceil(wallDepth / 0.46);
+    const wallStoneData: Array<{ column: number; layer: number; layers: number; z: number }> = [];
+    for (let column = 0; column < wallColumns; column += 1) {
+      const z = wallMinZ + column * (wallDepth / Math.max(1, wallColumns - 1));
+      const layers = Math.max(3, Math.ceil(wallTopHeightAt(z) / 0.23));
+      for (let layer = 0; layer < layers; layer += 1) wallStoneData.push({ column, layer, layers, z });
+    }
+    const rockCount = wallStoneData.length;
     const wall = new THREE.InstancedMesh(rockGeometry, rockMaterial, rockCount);
     const stone = new THREE.Object3D();
     for (let index = 0; index < rockCount; index += 1) {
-      const layer = Math.floor(index / stonesPerLayer);
-      const column = index % stonesPerLayer;
+      const { column, layer, layers, z } = wallStoneData[index];
+      const top = wallTopHeightAt(z);
       stone.position.set(
-        wallX + (hash(index + 900) - 0.5) * 0.52,
-        0.18 + layer * 0.29 + hash(index + 930) * 0.08,
-        wallMinZ + column * (wallDepth / Math.max(1, stonesPerLayer - 1)) + (hash(index + 960) - 0.5) * 0.24,
+        wallX + (hash(index + 900) - 0.5) * 0.58,
+        (layer + 0.52) * (top / layers) + hash(index + 930) * 0.035,
+        z + (hash(index + 960) - 0.5) * 0.22,
       );
       stone.rotation.set(hash(index + 990) * 0.5, hash(index + 1020) * Math.PI, hash(index + 1050) * 0.4);
-      stone.scale.set(0.75 + hash(index + 1080) * 0.5, 0.62 + hash(index + 1110) * 0.38, 0.78 + hash(index + 1140) * 0.45);
+      stone.scale.set(0.9 + hash(index + 1080) * 0.55, 0.52 + hash(index + 1110) * 0.3, 0.82 + hash(column + 1140) * 0.48);
       stone.updateMatrix();
       wall.setMatrixAt(index, stone.matrix);
     }
     wall.castShadow = true;
     wall.receiveShadow = true;
     scene.add(wall);
-
-    const fenceMaterial = new THREE.MeshStandardMaterial({ color: 0x6b7370, metalness: 0.76, roughness: 0.38 });
-    const sideFenceX = wallX + 1.2;
-    const sideFencePosts = 22;
-    const sideFenceBases: Array<{ z: number; y: number }> = [];
-    for (let index = 0; index <= sideFencePosts; index += 1) {
-      const z = wallMinZ + index * (wallDepth / sideFencePosts);
-      const y = retainedHillHeightAt(sideFenceX, z);
-      sideFenceBases.push({ z, y });
-      scene.add(makeBeam(new THREE.Vector3(sideFenceX, y, z), new THREE.Vector3(sideFenceX, y + 1.35, z), 0.025, fenceMaterial));
-    }
-    for (const height of [0.36, 0.78, 1.18]) {
-      for (let index = 0; index < sideFenceBases.length - 1; index += 1) {
-        const start = sideFenceBases[index];
-        const end = sideFenceBases[index + 1];
-        scene.add(makeBeam(
-          new THREE.Vector3(sideFenceX, start.y + height, start.z),
-          new THREE.Vector3(sideFenceX, end.y + height, end.z),
-          0.009,
-          fenceMaterial,
-        ));
-      }
-    }
-
-    const frontFenceZ = gravelCenterZ + gravelDepth / 2 + 0.6;
-    const frontFencePosts = 18;
-    for (let index = 0; index <= frontFencePosts; index += 1) {
-      const x = gravelMinX + index * ((wallX - gravelMinX) / frontFencePosts);
-      scene.add(makeBeam(new THREE.Vector3(x, 0, frontFenceZ), new THREE.Vector3(x, 1.35, frontFenceZ), 0.025, fenceMaterial));
-    }
-    for (const y of [0.36, 0.78, 1.18]) {
-      scene.add(makeBeam(new THREE.Vector3(gravelMinX, y, frontFenceZ), new THREE.Vector3(wallX, y, frontFenceZ), 0.009, fenceMaterial));
-    }
 
     const arrayGroup = new THREE.Group();
     scene.add(arrayGroup);
@@ -557,38 +537,61 @@ export function WindScene({
           glass.receiveShadow = true;
           glass.userData = { row: rowNumber, module: moduleNumber };
           assembly.add(glass);
-          const immediateDamaged = rowNumber <= 2
-            || (rowNumber === 3 && (moduleNumber % 7 === 0 || moduleNumber % 13 === 0))
-            || (rowNumber === 4 && moduleNumber % 23 === 0);
-          const damageSeed = hash(rowNumber * 1000 + moduleNumber);
+          const immediateDamaged = rowNumber <= 2;
+          const immediateMissing = rowNumber === 1
+            ? moduleNumber % 4 === 0 || moduleNumber % 7 === 0
+            : rowNumber === 2
+              ? moduleNumber % 4 === 0 || moduleNumber % 9 === 0
+              : false;
+          const immediatePresent = !immediateMissing;
           const immediatePosition = assembly.position.clone();
           const immediateRotation = new THREE.Euler(tilt, 0, 0);
           if (immediateDamaged) {
-            if (rowNumber <= 2) {
-              const upright = moduleNumber % 11 === 0 || moduleNumber % 17 === 0;
-              const folded = !upright && moduleNumber % 7 === 0;
-              immediatePosition.x += (hash(moduleNumber + rowNumber * 47) - 0.5) * 3.1;
-              immediatePosition.z = getRowCenterZ(1, geometry) + frontRowHorizontalDepth * 0.15 + damageSeed * 7.2;
-              if (moduleNumber % 19 === 0) immediatePosition.z = frontFenceZ + 1.4 + hash(moduleNumber + 221) * 2.2;
-              immediatePosition.y = upright ? panelSlopeM * 0.47 : folded ? 0.42 : 0.09 + hash(moduleNumber + 271) * 0.06;
+            const downhill = immediatePresent && (moduleNumber % 11 === 0 || moduleNumber % 17 === 0);
+            const upright = immediatePresent && !downhill && (moduleNumber % 19 === 0 || (rowNumber === 1 && moduleNumber === 13));
+            const stillAttached = immediatePresent && !downhill && !upright && moduleNumber % 3 === 1;
+            const folded = immediatePresent && !downhill && !upright && !stillAttached && moduleNumber % 7 === 0;
+            if (downhill) {
+              immediatePosition.x = gravelMinX + 1.5 + hash(moduleNumber + rowNumber * 47) * (gravelWidth - 3);
+              if (moduleNumber % 17 === 0) immediatePosition.x = gravelMinX - 1.2 - hash(moduleNumber + 191) * 3.8;
+              immediatePosition.z = gravelMaxZ + 1.5 + hash(moduleNumber + rowNumber * 71) * 7.5;
+              immediatePosition.y = siteTerrainHeightAt(immediatePosition.x, immediatePosition.z) + 0.09;
               immediateRotation.set(
-                upright ? THREE.MathUtils.degToRad(76 + hash(moduleNumber + 301) * 13) : folded ? THREE.MathUtils.degToRad(28 + hash(moduleNumber + 331) * 24) : THREE.MathUtils.degToRad(hash(moduleNumber + 361) * 5),
-                (hash(moduleNumber + 391) - 0.5) * 0.65,
-                (hash(moduleNumber + 421) - 0.5) * (upright ? 0.48 : 0.2),
+                THREE.MathUtils.degToRad(1 + hash(moduleNumber + 271) * 5),
+                (hash(moduleNumber + 301) - 0.5) * 1.5,
+                (hash(moduleNumber + 331) - 0.5) * 0.08,
+              );
+            } else if (upright) {
+              immediatePosition.x += (hash(moduleNumber + rowNumber * 89) - 0.5) * 1.3;
+              immediatePosition.z += 0.4 + hash(moduleNumber + 361) * 1.1;
+              immediatePosition.y = panelSlopeM * 0.48;
+              immediateRotation.set(
+                THREE.MathUtils.degToRad(78 + hash(moduleNumber + 391) * 9),
+                (hash(moduleNumber + 421) - 0.5) * 0.42,
+                (hash(moduleNumber + 451) - 0.5) * 0.28,
+              );
+            } else if (stillAttached) {
+              immediatePosition.x += (hash(moduleNumber + rowNumber * 97) - 0.5) * 0.5;
+              immediatePosition.z += (hash(moduleNumber + 481) - 0.5) * 0.7;
+              immediatePosition.y -= 0.04 + hash(moduleNumber + 511) * 0.12;
+              immediateRotation.set(
+                tilt + THREE.MathUtils.degToRad((hash(moduleNumber + 541) - 0.5) * 12),
+                (hash(moduleNumber + 571) - 0.5) * 0.2,
+                (hash(moduleNumber + 601) - 0.5) * 0.16,
               );
             } else {
-              immediatePosition.x += (hash(moduleNumber + rowNumber * 53) - 0.5) * 2.4;
-              immediatePosition.z += 2.2 + hash(moduleNumber + 451) * 3.4;
-              immediatePosition.y = 0.1 + hash(moduleNumber + 481) * 0.12;
+              immediatePosition.x += (hash(moduleNumber + rowNumber * 107) - 0.5) * 2.6;
+              immediatePosition.z += 0.2 + hash(moduleNumber + 631) * 1.8;
+              immediatePosition.y = folded ? 0.34 : 0.1 + hash(moduleNumber + 661) * 0.08;
               immediateRotation.set(
-                THREE.MathUtils.degToRad(hash(moduleNumber + 511) * 12),
-                (hash(moduleNumber + 541) - 0.5) * 0.55,
-                (hash(moduleNumber + 571) - 0.5) * 0.18,
+                folded ? THREE.MathUtils.degToRad(28 + hash(moduleNumber + 691) * 24) : THREE.MathUtils.degToRad(hash(moduleNumber + 721) * 9),
+                (hash(moduleNumber + 751) - 0.5) * 0.62,
+                (hash(moduleNumber + 781) - 0.5) * (folded ? 0.22 : 0.12),
               );
             }
           }
           let crack: THREE.Mesh | undefined;
-          if (immediateDamaged && moduleNumber % 9 === 0) {
+          if (immediateDamaged && immediatePresent && moduleNumber % 9 === 0) {
             crack = new THREE.Mesh(
               new THREE.BoxGeometry(0.018, 0.012, panelSlopeM * 0.72),
               new THREE.MeshBasicMaterial({ color: 0xcbd6d6 }),
@@ -609,6 +612,7 @@ export function WindScene({
             immediatePosition,
             immediateRotation,
             immediateDamaged,
+            immediatePresent,
             crack,
           });
           clickablePanels.push(glass);
@@ -621,7 +625,7 @@ export function WindScene({
         rail.position.set(rowOffsetX, railHeight, z + railZ);
         rail.castShadow = true;
         arrayGroup.add(rail);
-        rackVisuals.push({ object: rail, row: rowNumber, basePosition: rail.position.clone(), baseQuaternion: rail.quaternion.clone() });
+        rackVisuals.push({ object: rail, basePosition: rail.position.clone(), baseQuaternion: rail.quaternion.clone() });
       }
 
       const supportCount = Math.max(2, Math.round(geometry.rackSupportsFullRow * rowWidth / fullRowWidth));
@@ -632,8 +636,8 @@ export function WindScene({
         const brace = makeBeam(new THREE.Vector3(x, 0.08, z + 1.42), postTop, 0.038, rackMaterial);
         arrayGroup.add(post, brace);
         rackVisuals.push(
-          { object: post, row: rowNumber, basePosition: post.position.clone(), baseQuaternion: post.quaternion.clone() },
-          { object: brace, row: rowNumber, basePosition: brace.position.clone(), baseQuaternion: brace.quaternion.clone() },
+          { object: post, basePosition: post.position.clone(), baseQuaternion: post.quaternion.clone() },
+          { object: brace, basePosition: brace.position.clone(), baseQuaternion: brace.quaternion.clone() },
         );
       }
 
@@ -1125,7 +1129,8 @@ export function WindScene({
           panel.glass.material.color.copy(color);
           panel.glass.material.emissive.copy(selected ? new THREE.Color(0xffd84f) : color.clone().multiplyScalar(0.19));
           panel.glass.material.emissiveIntensity = selected ? 2.1 : live.viewMode === "flow" ? 0.32 : 0.66;
-          panel.assembly.visible = !(live.arrayState === "repaired" && panel.row <= 2);
+          panel.assembly.visible = !(live.arrayState === "repaired" && panel.row <= 2)
+            && !(live.arrayState === "immediate" && !panel.immediatePresent);
           if (live.arrayState === "immediate" && panel.immediateDamaged) {
             panel.assembly.position.copy(panel.immediatePosition);
             panel.assembly.rotation.copy(panel.immediateRotation);
@@ -1138,17 +1143,9 @@ export function WindScene({
           if (panel.crack) panel.crack.visible = live.arrayState === "immediate" && panel.immediateDamaged;
           if (selected && panel.assembly.visible) activePanel = panel;
         }
-        const rackDamageRotation = new THREE.Quaternion();
         for (const rack of rackVisuals) {
           rack.object.position.copy(rack.basePosition);
           rack.object.quaternion.copy(rack.baseQuaternion);
-          if (live.arrayState === "immediate" && rack.row <= 2) {
-            const direction = rack.row === 1 ? 1 : -1;
-            rack.object.position.y -= rack.row === 1 ? 0.33 : 0.2;
-            rack.object.position.z += rack.row === 1 ? 0.7 : 0.32;
-            rackDamageRotation.setFromAxisAngle(new THREE.Vector3(0, 0, 1), direction * THREE.MathUtils.degToRad(rack.row === 1 ? 7 : 4));
-            rack.object.quaternion.multiply(rackDamageRotation);
-          }
         }
         if (activePanel) {
           activePanel.assembly.add(selectionMarker);
