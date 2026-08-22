@@ -1,6 +1,11 @@
 export const ROW_COUNT = 7;
 export const MODULES_PER_ROW = 14;
 export const PANELS_DEEP_PER_ROW = 2;
+export const ROW_COLUMN_COUNTS = [6, 14, 14, 14, 14, 14, 6] as const;
+export const ROW_COLUMN_OFFSETS = [1.5, 0, 0, 0, 0, 0, 4] as const;
+export const ROW_PANEL_COUNTS = ROW_COLUMN_COUNTS.map((columns) => columns * PANELS_DEEP_PER_ROW);
+export const TOTAL_PANEL_COUNT = ROW_PANEL_COUNTS.reduce((total, panels) => total + panels, 0);
+export const POST_STORM_PANEL_COUNT = ROW_PANEL_COUNTS.slice(2).reduce((total, panels) => total + panels, 0);
 export const PANEL_WIDTH_M = 0.992;
 export const PANEL_LENGTH_M = 1.956;
 export const PANEL_THICKNESS_M = 0.04;
@@ -241,10 +246,13 @@ export function simulate(config: SimulationConfig): SimulationResult {
     const shelter = 1 - 0.11 * wakeBuild;
     const undersideCoefficient = 0.49 + 0.38 * Math.max(0, maukaAlignment);
     const exposedEdge = crossRowAlignment * Math.pow(downstreamFraction, 2) * 0.21;
+    const widthRatio = ROW_COLUMN_COUNTS[index] / MODULES_PER_ROW;
+    const partialRowEdge =
+      (1 - widthRatio) * crossRowAlignment * 0.08 * (0.35 + 0.65 * downstreamFraction);
     const meanUpliftKpa = dynamicPressureKpa * undersideCoefficient * shelter * mitigation.pressureFactor;
     const peakUpliftKpa =
       dynamicPressureKpa *
-      (undersideCoefficient * shelter + exposedEdge + 2.45 * localTi) *
+      (undersideCoefficient * shelter + exposedEdge + partialRowEdge + 2.45 * localTi) *
       mitigation.pressureFactor;
     const resonanceWeight = clamp((dynamicFactor - 0.45) / 4.6, 0.12, 1.45);
     const vibrationIndex = clamp(

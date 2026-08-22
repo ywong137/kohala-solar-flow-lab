@@ -16,7 +16,10 @@ import {
   PANEL_THICKNESS_M,
   PANEL_WIDTH_M,
   RACK_SUPPORTS_PER_ROW,
+  ROW_COLUMN_COUNTS,
+  ROW_COLUMN_OFFSETS,
   ROW_COUNT,
+  ROW_PANEL_COUNTS,
   ROW_SPACING_M,
   TABLE_CHORD_M,
   circularDifference,
@@ -257,12 +260,15 @@ export function WindScene({
     for (let rowIndex = 0; rowIndex < ROW_COUNT; rowIndex += 1) {
       const rowNumber = rowIndex + 1;
       const z = ((ROW_COUNT - 1) / 2 - rowIndex) * ROW_SPACING_M;
+      const rowColumns = ROW_COLUMN_COUNTS[rowIndex];
+      const rowOffsetX = ROW_COLUMN_OFFSETS[rowIndex] * modulePitch;
+      const rowWidth = rowColumns * modulePitch - PANEL_GAP_M;
 
       for (let depthIndex = 0; depthIndex < PANELS_DEEP_PER_ROW; depthIndex += 1) {
         const panelZ = (depthIndex - (PANELS_DEEP_PER_ROW - 1) / 2) * (PANEL_LENGTH_M + PANEL_GAP_M);
-        for (let moduleIndex = 0; moduleIndex < MODULES_PER_ROW; moduleIndex += 1) {
-          const x = (moduleIndex - (MODULES_PER_ROW - 1) / 2) * modulePitch;
-          const moduleNumber = depthIndex * MODULES_PER_ROW + moduleIndex + 1;
+        for (let moduleIndex = 0; moduleIndex < rowColumns; moduleIndex += 1) {
+          const x = rowOffsetX + (moduleIndex - (rowColumns - 1) / 2) * modulePitch;
+          const moduleNumber = depthIndex * rowColumns + moduleIndex + 1;
           const assembly = new THREE.Group();
           assembly.position.set(
             x,
@@ -305,14 +311,15 @@ export function WindScene({
 
       for (const railZ of [-TABLE_CHORD_M * 0.39, -TABLE_CHORD_M * 0.13, TABLE_CHORD_M * 0.13, TABLE_CHORD_M * 0.39]) {
         const railHeight = centerHeight - Math.sin(tilt) * railZ - 0.12;
-        const rail = new THREE.Mesh(new THREE.BoxGeometry(totalWidth + 0.1, 0.08, 0.09), rackMaterial);
-        rail.position.set(0, railHeight, z + railZ);
+        const rail = new THREE.Mesh(new THREE.BoxGeometry(rowWidth + 0.1, 0.08, 0.09), rackMaterial);
+        rail.position.set(rowOffsetX, railHeight, z + railZ);
         rail.castShadow = true;
         arrayGroup.add(rail);
       }
 
-      for (let support = 0; support < RACK_SUPPORTS_PER_ROW; support += 1) {
-        const x = -totalWidth / 2 + 0.65 + support * ((totalWidth - 1.3) / (RACK_SUPPORTS_PER_ROW - 1));
+      const supportCount = rowColumns === MODULES_PER_ROW ? RACK_SUPPORTS_PER_ROW : 3;
+      for (let support = 0; support < supportCount; support += 1) {
+        const x = rowOffsetX - rowWidth / 2 + 0.5 + support * ((rowWidth - 1) / (supportCount - 1));
         const postTop = new THREE.Vector3(x, centerHeight - 0.12, z - 0.15);
         const post = makeBeam(new THREE.Vector3(x, 0.08, z - 0.15), postTop, 0.045, rackMaterial);
         const brace = makeBeam(new THREE.Vector3(x, 0.08, z + 1.42), postTop, 0.038, rackMaterial);
@@ -320,8 +327,8 @@ export function WindScene({
       }
 
       const rowPosition = rowNumber === 1 ? " · FRONT" : rowNumber === 7 ? " · REAR" : "";
-      const label = makeTextSprite(`ROW ${rowNumber}${rowPosition}`);
-      label.position.set(-totalWidth / 2 - 3.35, 1.15, z);
+      const label = makeTextSprite(`ROW ${rowNumber}${rowPosition} · ${ROW_PANEL_COUNTS[rowIndex]} PANELS`);
+      label.position.set(rowOffsetX - rowWidth / 2 - 3.35, 1.15, z);
       label.scale.set(4.9, 1.22, 1);
       arrayGroup.add(label);
     }
@@ -393,9 +400,17 @@ export function WindScene({
     const vaneVisuals: THREE.Mesh[] = [];
     for (let row = 1; row <= ROW_COUNT; row += 1) {
       const z = ((ROW_COUNT - 1) / 2 - (row - 1)) * ROW_SPACING_M;
-      for (let vane = 0; vane < 7; vane += 1) {
+      const rowColumns = ROW_COLUMN_COUNTS[row - 1];
+      const rowOffsetX = ROW_COLUMN_OFFSETS[row - 1] * modulePitch;
+      const rowWidth = rowColumns * modulePitch - PANEL_GAP_M;
+      const vaneCount = rowColumns === MODULES_PER_ROW ? 7 : 3;
+      for (let vane = 0; vane < vaneCount; vane += 1) {
         const fin = new THREE.Mesh(new THREE.BoxGeometry(0.075, 0.72, 1), vaneMaterial);
-        fin.position.set(-totalWidth / 2 + 0.7 + vane * ((totalWidth - 1.4) / 6), 0.43, z);
+        fin.position.set(
+          rowOffsetX - rowWidth / 2 + 0.45 + vane * ((rowWidth - 0.9) / (vaneCount - 1)),
+          0.43,
+          z,
+        );
         fin.userData.rowZ = z;
         fin.userData.row = row;
         vaneGroup.add(fin);
@@ -415,14 +430,17 @@ export function WindScene({
     Object.values(spoilerStyleGroups).forEach((group) => spoilerGroup.add(group));
     for (let row = 1; row <= ROW_COUNT; row += 1) {
       const edgeZ = ((ROW_COUNT - 1) / 2 - (row - 1)) * ROW_SPACING_M + tableHorizontalDepth / 2;
-      const continuous = new THREE.Mesh(new THREE.BoxGeometry(totalWidth, 1, 0.075), spoilerMaterial);
-      continuous.position.set(0, lowEdgeHeight + 0.15, edgeZ);
+      const rowColumns = ROW_COLUMN_COUNTS[row - 1];
+      const rowOffsetX = ROW_COLUMN_OFFSETS[row - 1] * modulePitch;
+      const rowWidth = rowColumns * modulePitch - PANEL_GAP_M;
+      const continuous = new THREE.Mesh(new THREE.BoxGeometry(rowWidth, 1, 0.075), spoilerMaterial);
+      continuous.position.set(rowOffsetX, lowEdgeHeight + 0.15, edgeZ);
       continuous.userData.row = row;
       spoilerStyleGroups.continuous.add(continuous);
       spoilerVisuals.push(continuous);
 
-      for (let moduleIndex = 0; moduleIndex < MODULES_PER_ROW; moduleIndex += 1) {
-        const x = (moduleIndex - (MODULES_PER_ROW - 1) / 2) * modulePitch;
+      for (let moduleIndex = 0; moduleIndex < rowColumns; moduleIndex += 1) {
+        const x = rowOffsetX + (moduleIndex - (rowColumns - 1) / 2) * modulePitch;
         const perforated = new THREE.Mesh(new THREE.BoxGeometry(modulePitch * 0.62, 1, 0.075), spoilerMaterial);
         perforated.position.set(x, lowEdgeHeight + 0.15, edgeZ);
         perforated.userData.row = row;
@@ -441,11 +459,14 @@ export function WindScene({
     mitigationGroups.spoilers = spoilerGroup;
 
     const damperGroup = new THREE.Group();
-    const damperSets: Array<{ row: number; meshes: THREE.Mesh[] }> = [];
+    const damperSets: Array<{ row: number; width: number; offsetX: number; meshes: THREE.Mesh[] }> = [];
     const damperGlows: THREE.PointLight[] = [];
     const maxDampersPerRail = Math.ceil(totalWidth / 0.8) + 1;
     for (let row = 1; row <= ROW_COUNT; row += 1) {
       const z = ((ROW_COUNT - 1) / 2 - (row - 1)) * ROW_SPACING_M;
+      const rowColumns = ROW_COLUMN_COUNTS[row - 1];
+      const rowOffsetX = ROW_COLUMN_OFFSETS[row - 1] * modulePitch;
+      const rowWidth = rowColumns * modulePitch - PANEL_GAP_M;
       for (const railZ of [-TABLE_CHORD_M * 0.39, -TABLE_CHORD_M * 0.13, TABLE_CHORD_M * 0.13, TABLE_CHORD_M * 0.39]) {
         const set: THREE.Mesh[] = [];
         const railHeight = centerHeight - Math.sin(tilt) * railZ - 0.12;
@@ -456,10 +477,10 @@ export function WindScene({
           damperGroup.add(ring);
           set.push(ring);
         }
-        damperSets.push({ row, meshes: set });
+        damperSets.push({ row, width: rowWidth, offsetX: rowOffsetX, meshes: set });
       }
       const glow = new THREE.PointLight(0xff3fc8, 1.9, 8, 2);
-      glow.position.set(0, 1.15, z);
+      glow.position.set(rowOffsetX, 1.15, z);
       damperGroup.add(glow);
       damperGlows.push(glow);
     }
@@ -647,12 +668,17 @@ export function WindScene({
           spoiler.visible = spoiler.userData.row <= live.config.spoilerRowCount;
         }
 
-        const damperCount = clamp(Math.ceil(totalWidth / live.config.damperSpacingM) + 1, 2, maxDampersPerRail);
         const damperScale = 0.86 + live.config.damperDampingPercent * 0.035;
         for (const set of damperSets) {
+          const damperCount = clamp(
+            Math.ceil(set.width / live.config.damperSpacingM) + 1,
+            2,
+            maxDampersPerRail,
+          );
           set.meshes.forEach((damper, index) => {
             damper.visible = set.row <= live.config.damperRowCount && index < damperCount;
-            damper.position.x = -totalWidth / 2 + index * (totalWidth / Math.max(1, damperCount - 1));
+            damper.position.x =
+              set.offsetX - set.width / 2 + index * (set.width / Math.max(1, damperCount - 1));
             damper.scale.setScalar(damperScale);
           });
         }
@@ -754,7 +780,7 @@ export function WindScene({
   return (
     <div className="wind-scene" ref={hostRef}>
       <div className="scene-corner scene-location">
-        <span className="scene-kicker">SITE MODEL · 14 × 2 PHOTO COUNT · {PANEL_TILT_DEG.toFixed(1)}° TILT</span>
+        <span className="scene-kicker">PHOTO COUNT · R1 6 · R2–6 14 · R7 6 COLUMNS · {PANEL_TILT_DEG.toFixed(1)}° TILT</span>
         <strong>20.130687° N, 155.881243° W</strong>
         <span>58-1200 Akoni Pule Hwy · Kohala</span>
       </div>

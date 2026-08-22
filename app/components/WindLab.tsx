@@ -33,16 +33,18 @@ import {
   HIGH_EDGE_CLEARANCE_M,
   LOW_EDGE_CLEARANCE_M,
   MITIGATIONS,
-  MODULES_PER_ROW,
   PANEL_LENGTH_M,
   PANEL_TILT_DEG,
   PANEL_WIDTH_M,
-  PANELS_DEEP_PER_ROW,
+  POST_STORM_PANEL_COUNT,
   RACK_SUPPORTS_PER_ROW,
+  ROW_COLUMN_COUNTS,
   ROW_COUNT,
+  ROW_PANEL_COUNTS,
   ROW_SPACING_M,
   SCENARIOS,
   TABLE_CHORD_M,
+  TOTAL_PANEL_COUNT,
   cardinalDirection,
   riskColor,
   simulate,
@@ -88,7 +90,7 @@ export function WindLab() {
   const [showDamage, setShowDamage] = useState(false);
   const [cameraView, setCameraView] = useState<"perspective" | "mauka" | "makai" | "plan">("perspective");
   const [cameraRequest, setCameraRequest] = useState(0);
-  const [selectedPanel, setSelectedPanel] = useState({ row: 1, module: 21 });
+  const [selectedPanel, setSelectedPanel] = useState({ row: 1, module: 9 });
   const [showComparison, setShowComparison] = useState(false);
   const [showEvidence, setShowEvidence] = useState(false);
   const [showAssumptions, setShowAssumptions] = useState(false);
@@ -677,9 +679,9 @@ export function WindLab() {
       </section>
 
       <footer className="lab-footer">
-        <span><span className="status-dot" /> SITE CALIBRATION V0.2 · PHOTO ESTIMATE</span>
+        <span><span className="status-dot" /> SITE CALIBRATION V0.3 · PHOTO ESTIMATE</span>
         <span>JINKO 365 W · {PANEL_LENGTH_M.toFixed(3)} × {PANEL_WIDTH_M.toFixed(3)} m · {PANEL_TILT_DEG.toFixed(1)}° TILT</span>
-        <span>{ROW_COUNT} ROWS · {MODULES_PER_ROW * PANELS_DEEP_PER_ROW} PANELS / ROW · {ROW_SPACING_M.toFixed(2)} m PITCH</span>
+        <span>{TOTAL_PANEL_COUNT} PRE-STORM · R1/R7 {ROW_PANEL_COUNTS[0]} EACH · R2–6 {ROW_PANEL_COUNTS[1]} EACH · {ROW_SPACING_M.toFixed(2)} m PITCH</span>
       </footer>
 
       {showComparison ? (
@@ -731,7 +733,7 @@ export function WindLab() {
               <figure>
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src="/reference/satellite.png" alt="Satellite view of the facility and the large solar array" />
-                <figcaption><strong>North-up site view</strong><span>Large array · 14 columns × 2 panels estimated per row</span></figcaption>
+                <figcaption><strong>North-up site view</strong><span>R1: {ROW_COLUMN_COUNTS[0]} columns · R2–6: {ROW_COLUMN_COUNTS[1]} · R7: {ROW_COLUMN_COUNTS[6]}</span></figcaption>
               </figure>
               <figure>
                 {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -748,16 +750,17 @@ export function WindLab() {
           <section className="modal assumptions-modal" role="dialog" aria-modal="true" aria-label="Model assumptions" onMouseDown={(event) => event.stopPropagation()}>
             <div className="modal-head">
               <div>
-                <span className="eyebrow">MODEL BASIS · V0.2</span>
+                <span className="eyebrow">MODEL BASIS · V0.3</span>
                 <h2>What this model can test</h2>
               </div>
               <button className="icon-button" onClick={() => setShowAssumptions(false)} aria-label="Close assumptions"><X size={18} /></button>
             </div>
             <div className="assumption-grid">
-              <article><span>01</span><h3>Photo-counted geometry</h3><p>Seven rows use an estimated 14 columns × 2 panels. This gives 28 panels per row and 196 before the storm.</p></article>
+              <article><span>01</span><h3>Photo-counted geometry</h3><p>Rows 1 and 7 have six columns. Rows 2–6 have 14 columns. All rows use two panels along the slope.</p></article>
               <article><span>02</span><h3>Flow response</h3><p>The solver adds panel-row wakes along the wind path. It predicts relative pressure and turbulence, not full CFD.</p></article>
               <article><span>03</span><h3>Vibration</h3><p>The model compares a panel-scale shedding estimate with an adjustable natural frequency and damping ratio.</p></article>
-              <article><span>04</span><h3>Estimated rack</h3><p>{PANEL_TILT_DEG.toFixed(1)}° latitude tilt, {TABLE_CHORD_M.toFixed(2)} m slope, {LOW_EDGE_CLEARANCE_M.toFixed(2)}–{HIGH_EDGE_CLEARANCE_M.toFixed(2)} m clearance, {RACK_SUPPORTS_PER_ROW} support frames, and four rails.</p></article>
+              <article><span>04</span><h3>Array totals</h3><p>The estimate has {TOTAL_PANEL_COUNT} panels before the storm. It has {POST_STORM_PANEL_COUNT} after Rows 1 and 2 are removed.</p></article>
+              <article><span>05</span><h3>Estimated rack</h3><p>The rack uses a {TABLE_CHORD_M.toFixed(2)} m slope and {LOW_EDGE_CLEARANCE_M.toFixed(2)}–{HIGH_EDGE_CLEARANCE_M.toFixed(2)} m clearance. Full rows use {RACK_SUPPORTS_PER_ROW} support frames and four rails.</p></article>
             </div>
             <div className="modal-caution"><Info size={16} /> Do not use these values for final structural design or manufacturer compliance.</div>
           </section>
@@ -827,11 +830,16 @@ function clampPercent(value: number) {
 
 type WindAudioGraph = {
   context: AudioContext;
-  source: AudioBufferSourceNode;
-  outputGain: GainNode;
-  gustGain: GainNode;
-  lowpass: BiquadFilterNode;
-  lfo: OscillatorNode;
+  sources: AudioBufferSourceNode[];
+  masterGain: GainNode;
+  bodyGain: GainNode;
+  airGain: GainNode;
+  howlGain: GainNode;
+  bodyLowpass: BiquadFilterNode;
+  airLowpass: BiquadFilterNode;
+  howlFilter: BiquadFilterNode;
+  gustGains: GainNode[];
+  lfos: OscillatorNode[];
 };
 
 function useWindAudio(windSpeedMph: number, ambientTurbulence: number, playing: boolean) {
@@ -843,41 +851,114 @@ function useWindAudio(windSpeedMph: number, ambientTurbulence: number, playing: 
     if (typeof window === "undefined" || !window.AudioContext) return null;
 
     const context = new window.AudioContext();
-    const buffer = context.createBuffer(1, context.sampleRate * 4, context.sampleRate);
-    const data = buffer.getChannelData(0);
-    let previous = 0;
-    for (let index = 0; index < data.length; index += 1) {
+    const bufferLength = context.sampleRate * 8;
+    const pinkBuffer = context.createBuffer(1, bufferLength, context.sampleRate);
+    const pinkData = pinkBuffer.getChannelData(0);
+    let b0 = 0;
+    let b1 = 0;
+    let b2 = 0;
+    let b3 = 0;
+    let b4 = 0;
+    let b5 = 0;
+    let b6 = 0;
+    for (let index = 0; index < pinkData.length; index += 1) {
       const white = Math.random() * 2 - 1;
-      previous = (previous + white * 0.035) / 1.035;
-      data[index] = previous * 3.2;
+      b0 = 0.99886 * b0 + white * 0.0555179;
+      b1 = 0.99332 * b1 + white * 0.0750759;
+      b2 = 0.969 * b2 + white * 0.153852;
+      b3 = 0.8665 * b3 + white * 0.3104856;
+      b4 = 0.55 * b4 + white * 0.5329522;
+      b5 = -0.7616 * b5 - white * 0.016898;
+      pinkData[index] = (b0 + b1 + b2 + b3 + b4 + b5 + b6 + white * 0.5362) * 0.11;
+      b6 = white * 0.115926;
     }
 
-    const source = context.createBufferSource();
-    source.buffer = buffer;
-    source.loop = true;
+    const airBuffer = context.createBuffer(1, bufferLength, context.sampleRate);
+    const airData = airBuffer.getChannelData(0);
+    for (let index = 0; index < airData.length; index += 1) {
+      airData[index] = (Math.random() * 2 - 1) * 0.34;
+    }
 
-    const highpass = context.createBiquadFilter();
-    highpass.type = "highpass";
-    highpass.frequency.value = 75;
-    const lowpass = context.createBiquadFilter();
-    lowpass.type = "lowpass";
-    lowpass.frequency.value = 900;
-    lowpass.Q.value = 0.72;
-    const outputGain = context.createGain();
-    outputGain.gain.value = 0;
+    const makeSource = (buffer: AudioBuffer, rate: number, offset: number) => {
+      const source = context.createBufferSource();
+      source.buffer = buffer;
+      source.loop = true;
+      source.playbackRate.value = rate;
+      source.start(0, offset);
+      return source;
+    };
 
-    const lfo = context.createOscillator();
-    lfo.type = "sine";
-    lfo.frequency.value = 0.22;
-    const gustGain = context.createGain();
-    gustGain.gain.value = 0;
+    const bodySource = makeSource(pinkBuffer, 0.977, 0.4);
+    const howlSource = makeSource(pinkBuffer, 1.031, 3.1);
+    const airSource = makeSource(airBuffer, 0.991, 1.8);
 
-    source.connect(highpass).connect(lowpass).connect(outputGain).connect(context.destination);
-    lfo.connect(gustGain).connect(outputGain.gain);
-    source.start();
-    lfo.start();
+    const bodyHighpass = context.createBiquadFilter();
+    bodyHighpass.type = "highpass";
+    bodyHighpass.frequency.value = 55;
+    const bodyLowpass = context.createBiquadFilter();
+    bodyLowpass.type = "lowpass";
+    bodyLowpass.frequency.value = 1100;
+    bodyLowpass.Q.value = 0.38;
+    const bodyGain = context.createGain();
+    bodyGain.gain.value = 0.82;
+    const bodyPan = context.createStereoPanner();
+    bodyPan.pan.value = -0.12;
 
-    const graph = { context, source, outputGain, gustGain, lowpass, lfo };
+    const howlFilter = context.createBiquadFilter();
+    howlFilter.type = "bandpass";
+    howlFilter.frequency.value = 430;
+    howlFilter.Q.value = 0.48;
+    const howlGain = context.createGain();
+    howlGain.gain.value = 0.08;
+    const howlPan = context.createStereoPanner();
+    howlPan.pan.value = 0.2;
+
+    const airHighpass = context.createBiquadFilter();
+    airHighpass.type = "highpass";
+    airHighpass.frequency.value = 780;
+    const airLowpass = context.createBiquadFilter();
+    airLowpass.type = "lowpass";
+    airLowpass.frequency.value = 4200;
+    airLowpass.Q.value = 0.28;
+    const airGain = context.createGain();
+    airGain.gain.value = 0.1;
+    const airPan = context.createStereoPanner();
+    airPan.pan.value = 0.08;
+
+    const masterGain = context.createGain();
+    masterGain.gain.value = 0;
+    masterGain.connect(context.destination);
+
+    bodySource.connect(bodyHighpass).connect(bodyLowpass).connect(bodyGain).connect(bodyPan).connect(masterGain);
+    howlSource.connect(howlFilter).connect(howlGain).connect(howlPan).connect(masterGain);
+    airSource.connect(airHighpass).connect(airLowpass).connect(airGain).connect(airPan).connect(masterGain);
+
+    const lfos = [context.createOscillator(), context.createOscillator()];
+    const gustGains = [context.createGain(), context.createGain()];
+    lfos[0].frequency.value = 0.11;
+    lfos[1].frequency.value = 0.27;
+    gustGains.forEach((gain) => {
+      gain.gain.value = 0;
+    });
+    lfos.forEach((lfo, index) => {
+      lfo.type = "sine";
+      lfo.connect(gustGains[index]).connect(masterGain.gain);
+      lfo.start();
+    });
+
+    const graph = {
+      context,
+      sources: [bodySource, howlSource, airSource],
+      masterGain,
+      bodyGain,
+      airGain,
+      howlGain,
+      bodyLowpass,
+      airLowpass,
+      howlFilter,
+      gustGains,
+      lfos,
+    };
     graphRef.current = graph;
     return graph;
   }, []);
@@ -897,18 +978,28 @@ function useWindAudio(windSpeedMph: number, ambientTurbulence: number, playing: 
     const now = graph.context.currentTime;
     const normalizedSpeed = Math.min(1, Math.max(0, windSpeedMph / 150));
     const turbulenceGain = 0.82 + Math.min(35, ambientTurbulence) / 100;
-    const targetGain = muted || !playing ? 0 : (0.008 + 0.2 * Math.pow(normalizedSpeed, 1.4)) * turbulenceGain;
-    graph.outputGain.gain.setTargetAtTime(targetGain, now, 0.09);
-    graph.gustGain.gain.setTargetAtTime(targetGain * (0.12 + ambientTurbulence / 90), now, 0.14);
-    graph.lowpass.frequency.setTargetAtTime(420 + normalizedSpeed * 3100, now, 0.12);
-    graph.lfo.frequency.setTargetAtTime(0.1 + normalizedSpeed * 0.34, now, 0.15);
+    const targetGain = muted || !playing
+      ? 0
+      : (0.012 + 0.18 * Math.pow(normalizedSpeed, 1.35)) * turbulenceGain;
+    graph.masterGain.gain.setTargetAtTime(targetGain, now, 0.1);
+    graph.bodyGain.gain.setTargetAtTime(0.68 + normalizedSpeed * 0.24, now, 0.15);
+    graph.airGain.gain.setTargetAtTime(0.025 + Math.pow(normalizedSpeed, 1.55) * 0.25, now, 0.16);
+    graph.howlGain.gain.setTargetAtTime(0.045 + normalizedSpeed * ambientTurbulence * 0.0045, now, 0.2);
+    graph.bodyLowpass.frequency.setTargetAtTime(380 + normalizedSpeed * 2300, now, 0.16);
+    graph.airLowpass.frequency.setTargetAtTime(2100 + normalizedSpeed * 4300, now, 0.16);
+    graph.howlFilter.frequency.setTargetAtTime(190 + normalizedSpeed * 560, now, 0.22);
+    const gustDepth = muted || !playing ? 0 : targetGain * (0.045 + ambientTurbulence / 230);
+    graph.gustGains[0].gain.setTargetAtTime(gustDepth, now, 0.2);
+    graph.gustGains[1].gain.setTargetAtTime(gustDepth * 0.46, now, 0.2);
+    graph.lfos[0].frequency.setTargetAtTime(0.075 + normalizedSpeed * 0.095, now, 0.2);
+    graph.lfos[1].frequency.setTargetAtTime(0.19 + normalizedSpeed * 0.15, now, 0.2);
   }, [ambientTurbulence, muted, playing, windSpeedMph]);
 
   useEffect(() => () => {
     const graph = graphRef.current;
     if (!graph) return;
-    graph.source.stop();
-    graph.lfo.stop();
+    graph.sources.forEach((source) => source.stop());
+    graph.lfos.forEach((lfo) => lfo.stop());
     void graph.context.close();
   }, []);
 
