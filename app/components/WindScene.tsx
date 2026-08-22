@@ -21,6 +21,8 @@ import {
   ROW_COUNT,
   ROW_PANEL_COUNTS,
   ROW_SPACING_M,
+  ROW_STAGGER_M,
+  ROW_STAGGER_OFFSETS_M,
   TABLE_CHORD_M,
   circularDifference,
   getMitigationEffects,
@@ -201,7 +203,7 @@ export function WindScene({
     scene.fog = new THREE.FogExp2(0x071219, 0.0135);
 
     const camera = new THREE.PerspectiveCamera(42, 1, 0.1, 180);
-    camera.position.set(29, 22, 31);
+    camera.position.set(35, 27, 40);
 
     const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -216,7 +218,7 @@ export function WindScene({
     controls.enableDamping = true;
     controls.dampingFactor = 0.065;
     controls.minDistance = 12;
-    controls.maxDistance = 74;
+    controls.maxDistance = 100;
     controls.maxPolarAngle = Math.PI * 0.485;
     controls.target.set(0, 0.3, 0);
 
@@ -225,10 +227,10 @@ export function WindScene({
     sun.position.set(-22, 34, -16);
     sun.castShadow = true;
     sun.shadow.mapSize.set(2048, 2048);
-    sun.shadow.camera.left = -34;
-    sun.shadow.camera.right = 34;
-    sun.shadow.camera.top = 34;
-    sun.shadow.camera.bottom = -34;
+    sun.shadow.camera.left = -42;
+    sun.shadow.camera.right = 42;
+    sun.shadow.camera.top = 42;
+    sun.shadow.camera.bottom = -42;
     scene.add(sun);
     const rim = new THREE.DirectionalLight(0x54d9ff, 1.2);
     rim.position.set(24, 8, 30);
@@ -236,7 +238,7 @@ export function WindScene({
 
     const groundTexture = makeGroundTexture(renderer);
     const ground = new THREE.Mesh(
-      new THREE.PlaneGeometry(82, 72, 1, 1),
+      new THREE.PlaneGeometry(92, 84, 1, 1),
       new THREE.MeshStandardMaterial({ map: groundTexture, color: 0x52605b, roughness: 0.97, metalness: 0.02 }),
     );
     ground.rotation.x = -Math.PI / 2;
@@ -244,7 +246,7 @@ export function WindScene({
     ground.receiveShadow = true;
     scene.add(ground);
 
-    const grid = new THREE.GridHelper(72, 36, 0x4b6a70, 0x243b40);
+    const grid = new THREE.GridHelper(84, 42, 0x4b6a70, 0x243b40);
     grid.position.y = 0.015;
     const gridMaterials = Array.isArray(grid.material) ? grid.material : [grid.material];
     gridMaterials.forEach((material) => {
@@ -264,20 +266,26 @@ export function WindScene({
     const lowEdgeHeight = LOW_EDGE_CLEARANCE_M;
     const centerHeight = lowEdgeHeight + Math.sin(tilt) * TABLE_CHORD_M * 0.5;
     const modulePitch = PANEL_SPAN_M + PANEL_GAP_M;
-    const totalWidth = MODULES_PER_ROW * modulePitch - PANEL_GAP_M;
+    const fullRowWidth = MODULES_PER_ROW * modulePitch - PANEL_GAP_M;
     const tableHorizontalDepth = Math.cos(tilt) * TABLE_CHORD_M;
+    const getRowOffsetX = (index: number) =>
+      ROW_COLUMN_OFFSETS[index] * modulePitch + ROW_STAGGER_OFFSETS_M[index];
     const rowFlowGeometry = ROW_COLUMN_COUNTS.map((columns, index) => ({
       row: index + 1,
       z: ((ROW_COUNT - 1) / 2 - index) * ROW_SPACING_M,
-      offsetX: ROW_COLUMN_OFFSETS[index] * modulePitch,
+      offsetX: getRowOffsetX(index),
       width: columns * modulePitch - PANEL_GAP_M,
     }));
+    const arrayMinX = Math.min(...rowFlowGeometry.map((row) => row.offsetX - row.width / 2));
+    const arrayMaxX = Math.max(...rowFlowGeometry.map((row) => row.offsetX + row.width / 2));
+    const arrayCenterX = (arrayMinX + arrayMaxX) / 2;
+    const arrayWidth = arrayMaxX - arrayMinX;
 
     for (let rowIndex = 0; rowIndex < ROW_COUNT; rowIndex += 1) {
       const rowNumber = rowIndex + 1;
       const z = ((ROW_COUNT - 1) / 2 - rowIndex) * ROW_SPACING_M;
       const rowColumns = ROW_COLUMN_COUNTS[rowIndex];
-      const rowOffsetX = ROW_COLUMN_OFFSETS[rowIndex] * modulePitch;
+      const rowOffsetX = getRowOffsetX(rowIndex);
       const rowWidth = rowColumns * modulePitch - PANEL_GAP_M;
 
       for (let depthIndex = 0; depthIndex < PANELS_DEEP_PER_ROW; depthIndex += 1) {
@@ -350,10 +358,10 @@ export function WindScene({
     }
 
     const maukaLabel = makeTextSprite("MAUKA · NE · UPWIND", true);
-    maukaLabel.position.set(0, 1.8, -23.5);
+    maukaLabel.position.set(arrayCenterX, 1.8, -28.5);
     scene.add(maukaLabel);
     const makaiLabel = makeTextSprite("MAKAI · SW · DOWNWIND");
-    makaiLabel.position.set(0, 1.8, 23.5);
+    makaiLabel.position.set(arrayCenterX, 1.8, 28.5);
     scene.add(makaiLabel);
 
     const directionMaterial = new THREE.MeshStandardMaterial({ color: 0x8bf2c9, emissive: 0x245e4b, emissiveIntensity: 1.1 });
@@ -397,15 +405,15 @@ export function WindScene({
     const screenSlats: THREE.Mesh[] = [];
     const screenZ = -((ROW_COUNT - 1) / 2) * ROW_SPACING_M - 4.5;
     for (let post = 0; post < 9; post += 1) {
-      const x = -totalWidth / 2 - 0.7 + post * ((totalWidth + 1.4) / 8);
+      const x = arrayMinX - 0.7 + post * ((arrayWidth + 1.4) / 8);
       const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.055, 1, 10), screenMaterial);
       pole.position.set(x, 1.1, screenZ);
       screenGroup.add(pole);
       screenPosts.push(pole);
     }
     for (let strip = 0; strip < 12; strip += 1) {
-      const slat = new THREE.Mesh(new THREE.BoxGeometry(totalWidth + 1.4, 1, 0.075), screenMaterial);
-      slat.position.set(0, 0.2 + strip * 0.18, screenZ);
+      const slat = new THREE.Mesh(new THREE.BoxGeometry(arrayWidth + 1.4, 1, 0.075), screenMaterial);
+      slat.position.set(arrayCenterX, 0.2 + strip * 0.18, screenZ);
       screenGroup.add(slat);
       screenSlats.push(slat);
     }
@@ -417,7 +425,7 @@ export function WindScene({
     for (let row = 1; row <= ROW_COUNT; row += 1) {
       const z = ((ROW_COUNT - 1) / 2 - (row - 1)) * ROW_SPACING_M;
       const rowColumns = ROW_COLUMN_COUNTS[row - 1];
-      const rowOffsetX = ROW_COLUMN_OFFSETS[row - 1] * modulePitch;
+      const rowOffsetX = getRowOffsetX(row - 1);
       const rowWidth = rowColumns * modulePitch - PANEL_GAP_M;
       const vaneCount = rowColumns === MODULES_PER_ROW ? 7 : 3;
       for (let vane = 0; vane < vaneCount; vane += 1) {
@@ -447,7 +455,7 @@ export function WindScene({
     for (let row = 1; row <= ROW_COUNT; row += 1) {
       const edgeZ = ((ROW_COUNT - 1) / 2 - (row - 1)) * ROW_SPACING_M + tableHorizontalDepth / 2;
       const rowColumns = ROW_COLUMN_COUNTS[row - 1];
-      const rowOffsetX = ROW_COLUMN_OFFSETS[row - 1] * modulePitch;
+      const rowOffsetX = getRowOffsetX(row - 1);
       const rowWidth = rowColumns * modulePitch - PANEL_GAP_M;
       const continuous = new THREE.Mesh(new THREE.BoxGeometry(rowWidth, 1, 0.075), spoilerMaterial);
       continuous.position.set(rowOffsetX, lowEdgeHeight + 0.15, edgeZ);
@@ -477,11 +485,11 @@ export function WindScene({
     const damperGroup = new THREE.Group();
     const damperSets: Array<{ row: number; width: number; offsetX: number; meshes: THREE.Mesh[] }> = [];
     const damperGlows: THREE.PointLight[] = [];
-    const maxDampersPerRail = Math.ceil(totalWidth / 0.8) + 1;
+    const maxDampersPerRail = Math.ceil(fullRowWidth / 0.8) + 1;
     for (let row = 1; row <= ROW_COUNT; row += 1) {
       const z = ((ROW_COUNT - 1) / 2 - (row - 1)) * ROW_SPACING_M;
       const rowColumns = ROW_COLUMN_COUNTS[row - 1];
-      const rowOffsetX = ROW_COLUMN_OFFSETS[row - 1] * modulePitch;
+      const rowOffsetX = getRowOffsetX(row - 1);
       const rowWidth = rowColumns * modulePitch - PANEL_GAP_M;
       for (const railZ of [-TABLE_CHORD_M * 0.39, -TABLE_CHORD_M * 0.13, TABLE_CHORD_M * 0.13, TABLE_CHORD_M * 0.39]) {
         const set: THREE.Mesh[] = [];
@@ -508,9 +516,9 @@ export function WindScene({
     const particleSeeds = new Float32Array(particleCount);
     const particleTurbulence = new Float32Array(particleCount * 2);
     for (let index = 0; index < particleCount; index += 1) {
-      particlePositions[index * 3] = (Math.random() - 0.5) * 64;
+      particlePositions[index * 3] = (Math.random() - 0.5) * 72;
       particlePositions[index * 3 + 1] = 0.35 + Math.random() * 6.2;
-      particlePositions[index * 3 + 2] = (Math.random() - 0.5) * 62;
+      particlePositions[index * 3 + 2] = (Math.random() - 0.5) * 72;
       particleSeeds[index] = Math.random() * Math.PI * 2;
     }
     const particleGeometry = new THREE.BufferGeometry();
@@ -582,10 +590,10 @@ export function WindScene({
 
     const setCamera = (view: WindSceneProps["cameraView"]) => {
       const targets = {
-        perspective: { position: new THREE.Vector3(29, 22, 31), target: new THREE.Vector3(0, 0.3, 0) },
-        mauka: { position: new THREE.Vector3(0, 9, -37), target: new THREE.Vector3(0, 0.7, 2) },
-        makai: { position: new THREE.Vector3(0, 9, 37), target: new THREE.Vector3(0, 0.7, -2) },
-        plan: { position: new THREE.Vector3(0, 49, 0.01), target: new THREE.Vector3(0, 0, 0) },
+        perspective: { position: new THREE.Vector3(arrayCenterX + 34, 27, 40), target: new THREE.Vector3(arrayCenterX, 0.3, 0) },
+        mauka: { position: new THREE.Vector3(arrayCenterX, 12, -52), target: new THREE.Vector3(arrayCenterX, 0.7, 2) },
+        makai: { position: new THREE.Vector3(arrayCenterX, 12, 52), target: new THREE.Vector3(arrayCenterX, 0.7, -2) },
+        plan: { position: new THREE.Vector3(arrayCenterX, 68, 0.01), target: new THREE.Vector3(arrayCenterX, 0, 0) },
       };
       camera.position.copy(targets[view].position);
       controls.target.copy(targets[view].target);
@@ -595,8 +603,8 @@ export function WindScene({
     const resetParticle = (index: number, flowX: number, flowZ: number) => {
       const transverseX = -flowZ;
       const transverseZ = flowX;
-      const spread = (Math.random() - 0.5) * 66;
-      const upstream = -34 - Math.random() * 2;
+      const spread = (Math.random() - 0.5) * 76;
+      const upstream = -41 - Math.random() * 2;
       const layer = Math.random();
       const height = layer < 0.36
         ? 0.14 + Math.random() * 0.8
@@ -877,8 +885,8 @@ export function WindScene({
           const streamwisePosition = newX * normalizedFlowX + newZ * normalizedFlowZ;
           const transversePosition = newX * transverseX + newZ * transverseZ;
           if (
-            streamwisePosition > 36 ||
-            Math.abs(transversePosition) > 36 ||
+            streamwisePosition > 42 ||
+            Math.abs(transversePosition) > 42 ||
             particlePositions[offset + 1] < 0.095 ||
             particlePositions[offset + 1] > 8.5
           ) {
@@ -897,9 +905,9 @@ export function WindScene({
         const positions = attribute.array as Float32Array;
         const transverseX = -normalizedFlowZ;
         const transverseZ = normalizedFlowX;
-        let traceX = normalizedFlowX * -32 + transverseX * line.userData.offset;
+        let traceX = normalizedFlowX * -39 + transverseX * line.userData.offset;
         let traceY = line.userData.height;
-        let traceZ = normalizedFlowZ * -32 + transverseZ * line.userData.offset;
+        let traceZ = normalizedFlowZ * -39 + transverseZ * line.userData.offset;
         for (let point = 0; point < 52; point += 1) {
           positions[point * 3] = traceX;
           positions[point * 3 + 1] = traceY;
@@ -921,7 +929,7 @@ export function WindScene({
             0.1,
             Math.hypot(streamlineFlowSample.vx, streamlineFlowSample.vz),
           );
-          const stepLength = 1.28;
+          const stepLength = 1.5;
           traceX += (streamlineFlowSample.vx / horizontalSpeed) * stepLength;
           traceZ += (streamlineFlowSample.vz / horizontalSpeed) * stepLength;
           traceY = clamp(
@@ -976,7 +984,7 @@ export function WindScene({
   return (
     <div className="wind-scene" ref={hostRef}>
       <div className="scene-corner scene-location">
-        <span className="scene-kicker">PORTRAIT MODULES · R1/R7 SOUTHEAST ALIGNED · {PANEL_TILT_DEG.toFixed(1)}° TILT</span>
+        <span className="scene-kicker">PORTRAIT MODULES · {ROW_SPACING_M.toFixed(2)} m PITCH · {ROW_STAGGER_M.toFixed(2)} m STAGGER</span>
         <strong>20.130687° N, 155.881243° W</strong>
         <span>58-1200 Akoni Pule Hwy · Kohala</span>
       </div>

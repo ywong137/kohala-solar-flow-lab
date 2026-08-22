@@ -38,10 +38,10 @@ import {
   PANEL_WIDTH_M,
   POST_STORM_PANEL_COUNT,
   RACK_SUPPORTS_PER_ROW,
-  ROW_COLUMN_COUNTS,
   ROW_COUNT,
   ROW_PANEL_COUNTS,
   ROW_SPACING_M,
+  ROW_STAGGER_M,
   SCENARIOS,
   TABLE_CHORD_M,
   TOTAL_PANEL_COUNT,
@@ -679,9 +679,9 @@ export function WindLab() {
       </section>
 
       <footer className="lab-footer">
-        <span><span className="status-dot" /> SITE CALIBRATION V0.5 · PHOTO ESTIMATE</span>
+        <span><span className="status-dot" /> SITE CALIBRATION V0.6 · PHOTO ESTIMATE</span>
         <span>JINKO 365 W · {PANEL_LENGTH_M.toFixed(3)} × {PANEL_WIDTH_M.toFixed(3)} m · {PANEL_TILT_DEG.toFixed(1)}° TILT</span>
-        <span>{TOTAL_PANEL_COUNT} PRE-STORM · R1/R7 {ROW_PANEL_COUNTS[0]} EACH · R2–6 {ROW_PANEL_COUNTS[1]} EACH · {ROW_SPACING_M.toFixed(2)} m PITCH</span>
+        <span>{TOTAL_PANEL_COUNT} PRE-STORM · R1/R7 {ROW_PANEL_COUNTS[0]} EACH · {ROW_SPACING_M.toFixed(2)} m PITCH · {ROW_STAGGER_M.toFixed(2)} m STAGGER</span>
       </footer>
 
       {showComparison ? (
@@ -733,7 +733,7 @@ export function WindLab() {
               <figure>
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src="/reference/satellite.png" alt="Satellite view of the facility and the large solar array" />
-                <figcaption><strong>North-up site view</strong><span>R1/R7: {ROW_COLUMN_COUNTS[0]} columns at the southeast end · R2–6: {ROW_COLUMN_COUNTS[1]}</span></figcaption>
+                <figcaption><strong>North-up site view</strong><span>{ROW_SPACING_M.toFixed(2)} m row pitch · {ROW_STAGGER_M.toFixed(2)} m southeast stagger</span></figcaption>
               </figure>
               <figure>
                 {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -750,13 +750,14 @@ export function WindLab() {
           <section className="modal assumptions-modal" role="dialog" aria-modal="true" aria-label="Model assumptions" onMouseDown={(event) => event.stopPropagation()}>
             <div className="modal-head">
               <div>
-                <span className="eyebrow">MODEL BASIS · V0.5</span>
+                <span className="eyebrow">MODEL BASIS · V0.6</span>
                 <h2>What this model can test</h2>
               </div>
               <button className="icon-button" onClick={() => setShowAssumptions(false)} aria-label="Close assumptions"><X size={18} /></button>
             </div>
             <div className="assumption-grid">
               <article><span>01</span><h3>Photo-counted geometry</h3><p>Rows 1 and 7 have 14 southeast-aligned columns. Rows 2–6 have 28 columns. Each table uses two portrait panels along the slope.</p></article>
+              <article><span>07</span><h3>Staggered row layout</h3><p>The rows form a southeast echelon. Each rearward row shifts {ROW_STAGGER_M.toFixed(2)} m southeast. Row centers use a {ROW_SPACING_M.toFixed(2)} m pitch.</p></article>
               <article><span>02</span><h3>Flow response</h3><p>The particle field follows each rack surface. It models underside acceleration, surface blocking, wake decay, and turbulence. It is not full CFD.</p></article>
               <article><span>03</span><h3>Vibration</h3><p>The model compares a panel-scale shedding estimate with an adjustable natural frequency and damping ratio.</p></article>
               <article><span>04</span><h3>Array totals</h3><p>The estimate has {TOTAL_PANEL_COUNT} panels before the storm. It has {POST_STORM_PANEL_COUNT} after Rows 1 and 2 are removed.</p></article>
