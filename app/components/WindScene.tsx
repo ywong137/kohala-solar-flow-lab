@@ -3,24 +3,10 @@
 import { useEffect, useRef } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
+import { getArrayMetrics } from "../lib/array-config";
 import {
-  LOW_EDGE_CLEARANCE_M,
   MITIGATIONS,
-  MODULE_PITCH_M,
-  MODULES_PER_ROW,
-  PANEL_GAP_M,
-  PANELS_DEEP_PER_ROW,
-  PANEL_SLOPE_M,
-  PANEL_SPAN_M,
-  PANEL_TILT_DEG,
-  PANEL_THICKNESS_M,
-  RACK_SUPPORTS_PER_ROW,
-  ROW_COLUMN_COUNTS,
-  ROW_COUNT,
-  ROW_PANEL_COUNTS,
-  ROW_SPACING_M,
-  ROW_STAGGER_M,
-  TABLE_CHORD_M,
+  getArrayBounds,
   getFlowComponents,
   getInstalledScreenRows,
   getPanelResult,
@@ -29,6 +15,7 @@ import {
   getRowWidth,
   getScreenFlowEffects,
   getScreenGeometry,
+  rowIsInRange,
   type SimulationConfig,
   type SimulationResult,
   type ViewMode,
@@ -183,6 +170,7 @@ export function WindScene({
   onSelectPanel,
 }: WindSceneProps) {
   const hostRef = useRef<HTMLDivElement>(null);
+  const geometryKey = JSON.stringify(config.geometry);
   const liveRef = useRef({
     config,
     result,
@@ -212,12 +200,26 @@ export function WindScene({
   useEffect(() => {
     const host = hostRef.current;
     if (!host) return;
+    const geometry = liveRef.current.config.geometry;
+    const geometryMetrics = getArrayMetrics(geometry);
+    const rowCount = geometry.rows.length;
+    const panelSpanM = geometry.panelWidthM;
+    const panelSlopeM = geometry.panelLengthM;
+    const panelGapM = geometry.panelGapM;
+    const panelThicknessM = geometry.panelThicknessM;
+    const tableChordM = geometryMetrics.tableChordM;
+    const rowSpacingM = geometry.rowSpacingM;
+    const arrayBounds = getArrayBounds(geometry);
+    const arrayCenterX = arrayBounds.centerX;
+    const sceneWidth = Math.max(92, arrayBounds.width + 26);
+    const sceneDepth = Math.max(84, (rowCount - 1) * rowSpacingM + tableChordM + 28);
+    const sceneExtent = Math.max(sceneWidth, sceneDepth);
 
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x071219);
     scene.fog = new THREE.FogExp2(0x071219, 0.0135);
 
-    const camera = new THREE.PerspectiveCamera(42, 1, 0.1, 180);
+    const camera = new THREE.PerspectiveCamera(42, 1, 0.1, Math.max(180, sceneExtent * 4));
     camera.position.set(35, 27, 40);
 
     const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
@@ -233,7 +235,7 @@ export function WindScene({
     controls.enableDamping = true;
     controls.dampingFactor = 0.065;
     controls.minDistance = 12;
-    controls.maxDistance = 100;
+    controls.maxDistance = Math.max(100, sceneExtent * 2.2);
     controls.maxPolarAngle = Math.PI * 0.485;
     controls.target.set(0, 0.3, 0);
 
@@ -253,7 +255,7 @@ export function WindScene({
 
     const groundTexture = makeGroundTexture(renderer);
     const ground = new THREE.Mesh(
-      new THREE.PlaneGeometry(92, 84, 1, 1),
+      new THREE.PlaneGeometry(sceneWidth, sceneDepth, 1, 1),
       new THREE.MeshStandardMaterial({ map: groundTexture, color: 0x52605b, roughness: 0.97, metalness: 0.02 }),
     );
     ground.rotation.x = -Math.PI / 2;
@@ -261,7 +263,7 @@ export function WindScene({
     ground.receiveShadow = true;
     scene.add(ground);
 
-    const grid = new THREE.GridHelper(84, 42, 0x4b6a70, 0x243b40);
+    const grid = new THREE.GridHelper(sceneExtent, Math.max(42, Math.round(sceneExtent / 2)), 0x4b6a70, 0x243b40);
     grid.position.y = 0.015;
     const gridMaterials = Array.isArray(grid.material) ? grid.material : [grid.material];
     gridMaterials.forEach((material) => {
@@ -277,45 +279,47 @@ export function WindScene({
     const panelTexture = makePanelTexture(renderer);
     const frameMaterial = new THREE.MeshStandardMaterial({ color: 0x9aa9a8, metalness: 0.82, roughness: 0.26 });
     const rackMaterial = new THREE.MeshStandardMaterial({ color: 0x758482, metalness: 0.88, roughness: 0.3 });
-    const tilt = THREE.MathUtils.degToRad(PANEL_TILT_DEG);
-    const lowEdgeHeight = LOW_EDGE_CLEARANCE_M;
-    const centerHeight = lowEdgeHeight + Math.sin(tilt) * TABLE_CHORD_M * 0.5;
-    const modulePitch = MODULE_PITCH_M;
-    const fullRowWidth = MODULES_PER_ROW * modulePitch - PANEL_GAP_M;
-    const tableHorizontalDepth = Math.cos(tilt) * TABLE_CHORD_M;
-    const rowFlowGeometry = ROW_COLUMN_COUNTS.map((columns, index) => ({
+    const tilt = THREE.MathUtils.degToRad(geometry.tiltDeg);
+    const lowEdgeHeight = geometry.lowEdgeClearanceM;
+    const modulePitch = geometryMetrics.modulePitchM;
+    const fullRowWidth = Math.max(...geometry.rows.map((_, index) => getRowWidth(index + 1, geometry)));
+    const rowFlowGeometry = geometry.rows.map((rowConfig, index) => ({
       row: index + 1,
-      z: getRowCenterZ(index + 1),
-      offsetX: getRowOffsetX(index + 1),
-      width: getRowWidth(index + 1),
+      columns: rowConfig.columns,
+      panelsDeep: rowConfig.panelsDeep,
+      tableChordM: rowConfig.panelsDeep * panelSlopeM + (rowConfig.panelsDeep - 1) * panelGapM,
+      horizontalDepth: Math.cos(tilt) * (rowConfig.panelsDeep * panelSlopeM + (rowConfig.panelsDeep - 1) * panelGapM),
+      centerHeight: lowEdgeHeight + Math.sin(tilt) * (rowConfig.panelsDeep * panelSlopeM + (rowConfig.panelsDeep - 1) * panelGapM) * 0.5,
+      z: getRowCenterZ(index + 1, geometry),
+      offsetX: getRowOffsetX(index + 1, geometry),
+      width: getRowWidth(index + 1, geometry),
     }));
-    const arrayMinX = Math.min(...rowFlowGeometry.map((row) => row.offsetX - row.width / 2));
-    const arrayMaxX = Math.max(...rowFlowGeometry.map((row) => row.offsetX + row.width / 2));
-    const arrayCenterX = (arrayMinX + arrayMaxX) / 2;
-
-    for (let rowIndex = 0; rowIndex < ROW_COUNT; rowIndex += 1) {
+    for (let rowIndex = 0; rowIndex < rowCount; rowIndex += 1) {
       const rowNumber = rowIndex + 1;
-      const z = getRowCenterZ(rowNumber);
-      const rowColumns = ROW_COLUMN_COUNTS[rowIndex];
-      const rowOffsetX = getRowOffsetX(rowNumber);
-      const rowWidth = getRowWidth(rowNumber);
+      const rowConfig = geometry.rows[rowIndex];
+      const z = getRowCenterZ(rowNumber, geometry);
+      const rowColumns = rowConfig.columns;
+      const rowOffsetX = getRowOffsetX(rowNumber, geometry);
+      const rowWidth = getRowWidth(rowNumber, geometry);
+      const rowChordM = rowConfig.panelsDeep * panelSlopeM + (rowConfig.panelsDeep - 1) * panelGapM;
+      const rowCenterHeight = lowEdgeHeight + Math.sin(tilt) * rowChordM * 0.5;
 
-      for (let depthIndex = 0; depthIndex < PANELS_DEEP_PER_ROW; depthIndex += 1) {
-        const panelZ = (depthIndex - (PANELS_DEEP_PER_ROW - 1) / 2) * (PANEL_SLOPE_M + PANEL_GAP_M);
+      for (let depthIndex = 0; depthIndex < rowConfig.panelsDeep; depthIndex += 1) {
+        const panelZ = (depthIndex - (rowConfig.panelsDeep - 1) / 2) * (panelSlopeM + panelGapM);
         for (let moduleIndex = 0; moduleIndex < rowColumns; moduleIndex += 1) {
           const x = rowOffsetX + (moduleIndex - (rowColumns - 1) / 2) * modulePitch;
           const moduleNumber = depthIndex * rowColumns + moduleIndex + 1;
           const assembly = new THREE.Group();
           assembly.position.set(
             x,
-            centerHeight - Math.sin(tilt) * panelZ,
+            rowCenterHeight - Math.sin(tilt) * panelZ,
             z + Math.cos(tilt) * panelZ,
           );
           assembly.rotation.x = tilt;
           assembly.userData = { row: rowNumber, module: moduleNumber };
 
           const frame = new THREE.Mesh(
-            new THREE.BoxGeometry(PANEL_SPAN_M + PANEL_GAP_M, PANEL_THICKNESS_M + 0.035, PANEL_SLOPE_M + PANEL_GAP_M),
+            new THREE.BoxGeometry(panelSpanM + panelGapM, panelThicknessM + 0.035, panelSlopeM + panelGapM),
             frameMaterial,
           );
           frame.castShadow = true;
@@ -331,7 +335,7 @@ export function WindScene({
             emissiveIntensity: 0.42,
           });
           const glass = new THREE.Mesh(
-            new THREE.BoxGeometry(PANEL_SPAN_M - 0.045, PANEL_THICKNESS_M + 0.005, PANEL_SLOPE_M - 0.045),
+            new THREE.BoxGeometry(panelSpanM - 0.045, panelThicknessM + 0.005, panelSlopeM - 0.045),
             glassMaterial,
           );
           glass.position.y = 0.055;
@@ -345,35 +349,35 @@ export function WindScene({
         }
       }
 
-      for (const railZ of [-TABLE_CHORD_M * 0.39, -TABLE_CHORD_M * 0.13, TABLE_CHORD_M * 0.13, TABLE_CHORD_M * 0.39]) {
-        const railHeight = centerHeight - Math.sin(tilt) * railZ - 0.12;
+      for (const railZ of [-rowChordM * 0.39, -rowChordM * 0.13, rowChordM * 0.13, rowChordM * 0.39]) {
+        const railHeight = rowCenterHeight - Math.sin(tilt) * railZ - 0.12;
         const rail = new THREE.Mesh(new THREE.BoxGeometry(rowWidth + 0.1, 0.08, 0.09), rackMaterial);
         rail.position.set(rowOffsetX, railHeight, z + railZ);
         rail.castShadow = true;
         arrayGroup.add(rail);
       }
 
-      const supportCount = rowColumns === MODULES_PER_ROW ? RACK_SUPPORTS_PER_ROW : 4;
+      const supportCount = Math.max(2, Math.round(geometry.rackSupportsFullRow * rowWidth / fullRowWidth));
       for (let support = 0; support < supportCount; support += 1) {
         const x = rowOffsetX - rowWidth / 2 + 0.5 + support * ((rowWidth - 1) / (supportCount - 1));
-        const postTop = new THREE.Vector3(x, centerHeight - 0.12, z - 0.15);
+        const postTop = new THREE.Vector3(x, rowCenterHeight - 0.12, z - 0.15);
         const post = makeBeam(new THREE.Vector3(x, 0.08, z - 0.15), postTop, 0.045, rackMaterial);
         const brace = makeBeam(new THREE.Vector3(x, 0.08, z + 1.42), postTop, 0.038, rackMaterial);
         arrayGroup.add(post, brace);
       }
 
-      const rowPosition = rowNumber === 1 ? " · FRONT" : rowNumber === 7 ? " · REAR" : "";
-      const label = makeTextSprite(`ROW ${rowNumber}${rowPosition} · ${ROW_PANEL_COUNTS[rowIndex]} PANELS`);
+      const rowPosition = rowNumber === 1 ? " · FRONT" : rowNumber === rowCount ? " · REAR" : "";
+      const label = makeTextSprite(`ROW ${rowNumber}${rowPosition} · ${rowColumns * rowConfig.panelsDeep} PANELS`);
       label.position.set(rowOffsetX - rowWidth / 2 - 3.35, 1.15, z);
       label.scale.set(4.9, 1.22, 1);
       arrayGroup.add(label);
     }
 
     const maukaLabel = makeTextSprite("MAUKA · NE · UPWIND", "accent");
-    maukaLabel.position.set(arrayCenterX, 1.8, -28.5);
+    maukaLabel.position.set(arrayCenterX, 1.8, -sceneDepth / 2 + 4);
     scene.add(maukaLabel);
     const makaiLabel = makeTextSprite("MAKAI · SW · DOWNWIND");
-    makaiLabel.position.set(arrayCenterX, 1.8, 28.5);
+    makaiLabel.position.set(arrayCenterX, 1.8, sceneDepth / 2 - 4);
     scene.add(makaiLabel);
 
     const selectionMaterial = new THREE.MeshBasicMaterial({
@@ -385,18 +389,18 @@ export function WindScene({
     const selectionMarker = new THREE.Group();
     const selectionBorderThickness = 0.055;
     const selectionBorderHeight = 0.035;
-    for (const z of [-PANEL_SLOPE_M / 2 - 0.055, PANEL_SLOPE_M / 2 + 0.055]) {
+    for (const z of [-panelSlopeM / 2 - 0.055, panelSlopeM / 2 + 0.055]) {
       const border = new THREE.Mesh(
-        new THREE.BoxGeometry(PANEL_SPAN_M + 0.18, selectionBorderHeight, selectionBorderThickness),
+        new THREE.BoxGeometry(panelSpanM + 0.18, selectionBorderHeight, selectionBorderThickness),
         selectionMaterial,
       );
       border.position.z = z;
       border.renderOrder = 30;
       selectionMarker.add(border);
     }
-    for (const x of [-PANEL_SPAN_M / 2 - 0.055, PANEL_SPAN_M / 2 + 0.055]) {
+    for (const x of [-panelSpanM / 2 - 0.055, panelSpanM / 2 + 0.055]) {
       const border = new THREE.Mesh(
-        new THREE.BoxGeometry(selectionBorderThickness, selectionBorderHeight, PANEL_SLOPE_M + 0.18),
+        new THREE.BoxGeometry(selectionBorderThickness, selectionBorderHeight, panelSlopeM + 0.18),
         selectionMaterial,
       );
       border.position.x = x;
@@ -454,28 +458,28 @@ export function WindScene({
       posts: THREE.Mesh[];
       slats: THREE.Mesh[];
     }> = [];
-    for (let row = 1; row <= ROW_COUNT; row += 1) {
-      const geometry = getScreenGeometry(row);
+    for (let row = 1; row <= rowCount; row += 1) {
+      const screenGeometry = getScreenGeometry(row, geometry);
       const group = new THREE.Group();
       const posts: THREE.Mesh[] = [];
       const slats: THREE.Mesh[] = [];
-      const postCount = Math.max(5, Math.ceil(geometry.width / 4) + 1);
+      const postCount = Math.max(5, Math.ceil(screenGeometry.width / 4) + 1);
       for (let post = 0; post < postCount; post += 1) {
-        const x = geometry.x - geometry.width / 2 + post * (geometry.width / (postCount - 1));
+        const x = screenGeometry.x - screenGeometry.width / 2 + post * (screenGeometry.width / (postCount - 1));
         const pole = new THREE.Mesh(
           new THREE.CylinderGeometry(0.055, 0.055, 1, 10),
           screenMaterial,
         );
-        pole.position.set(x, 1.1, geometry.z);
+        pole.position.set(x, 1.1, screenGeometry.z);
         group.add(pole);
         posts.push(pole);
       }
       for (let strip = 0; strip < 12; strip += 1) {
         const slat = new THREE.Mesh(
-          new THREE.BoxGeometry(geometry.width, 1, 0.075),
+          new THREE.BoxGeometry(screenGeometry.width, 1, 0.075),
           screenMaterial,
         );
-        slat.position.set(geometry.x, 0.2 + strip * 0.18, geometry.z);
+        slat.position.set(screenGeometry.x, 0.2 + strip * 0.18, screenGeometry.z);
         group.add(slat);
         slats.push(slat);
       }
@@ -487,12 +491,12 @@ export function WindScene({
 
     const vaneGroup = new THREE.Group();
     const vaneVisuals: THREE.Mesh[] = [];
-    for (let row = 1; row <= ROW_COUNT; row += 1) {
-      const z = getRowCenterZ(row);
-      const rowColumns = ROW_COLUMN_COUNTS[row - 1];
-      const rowOffsetX = getRowOffsetX(row);
-      const rowWidth = getRowWidth(row);
-      const vaneCount = rowColumns === MODULES_PER_ROW ? 7 : 3;
+    for (let row = 1; row <= rowCount; row += 1) {
+      const z = getRowCenterZ(row, geometry);
+      const rowOffsetX = getRowOffsetX(row, geometry);
+      const rowWidth = getRowWidth(row, geometry);
+      const rowHorizontalDepth = rowFlowGeometry[row - 1].horizontalDepth;
+      const vaneCount = Math.max(3, Math.round(7 * rowWidth / fullRowWidth));
       for (let vane = 0; vane < vaneCount; vane += 1) {
         const fin = new THREE.Mesh(new THREE.BoxGeometry(0.075, 0.72, 1), vaneMaterial);
         fin.position.set(
@@ -501,6 +505,7 @@ export function WindScene({
           z,
         );
         fin.userData.rowZ = z;
+        fin.userData.rowHorizontalDepth = rowHorizontalDepth;
         fin.userData.row = row;
         vaneGroup.add(fin);
         vaneVisuals.push(fin);
@@ -517,11 +522,11 @@ export function WindScene({
     };
     const spoilerVisuals: THREE.Mesh[] = [];
     Object.values(spoilerStyleGroups).forEach((group) => spoilerGroup.add(group));
-    for (let row = 1; row <= ROW_COUNT; row += 1) {
-      const edgeZ = getRowCenterZ(row) + tableHorizontalDepth / 2;
-      const rowColumns = ROW_COLUMN_COUNTS[row - 1];
-      const rowOffsetX = getRowOffsetX(row);
-      const rowWidth = getRowWidth(row);
+    for (let row = 1; row <= rowCount; row += 1) {
+      const edgeZ = getRowCenterZ(row, geometry) + rowFlowGeometry[row - 1].horizontalDepth / 2;
+      const rowColumns = geometry.rows[row - 1].columns;
+      const rowOffsetX = getRowOffsetX(row, geometry);
+      const rowWidth = getRowWidth(row, geometry);
       const continuous = new THREE.Mesh(new THREE.BoxGeometry(rowWidth, 1, 0.075), spoilerMaterial);
       continuous.position.set(rowOffsetX, lowEdgeHeight + 0.15, edgeZ);
       continuous.userData.row = row;
@@ -551,13 +556,15 @@ export function WindScene({
     const damperSets: Array<{ row: number; width: number; offsetX: number; meshes: THREE.Mesh[] }> = [];
     const damperGlows: THREE.PointLight[] = [];
     const maxDampersPerRail = Math.ceil(fullRowWidth / 0.8) + 1;
-    for (let row = 1; row <= ROW_COUNT; row += 1) {
-      const z = getRowCenterZ(row);
-      const rowOffsetX = getRowOffsetX(row);
-      const rowWidth = getRowWidth(row);
-      for (const railZ of [-TABLE_CHORD_M * 0.39, -TABLE_CHORD_M * 0.13, TABLE_CHORD_M * 0.13, TABLE_CHORD_M * 0.39]) {
+    for (let row = 1; row <= rowCount; row += 1) {
+      const z = getRowCenterZ(row, geometry);
+      const rowOffsetX = getRowOffsetX(row, geometry);
+      const rowWidth = getRowWidth(row, geometry);
+      const rowChordM = rowFlowGeometry[row - 1].tableChordM;
+      const rowCenterHeight = rowFlowGeometry[row - 1].centerHeight;
+      for (const railZ of [-rowChordM * 0.39, -rowChordM * 0.13, rowChordM * 0.13, rowChordM * 0.39]) {
         const set: THREE.Mesh[] = [];
-        const railHeight = centerHeight - Math.sin(tilt) * railZ - 0.12;
+        const railHeight = rowCenterHeight - Math.sin(tilt) * railZ - 0.12;
         for (let damper = 0; damper < maxDampersPerRail; damper += 1) {
           const ring = new THREE.Mesh(new THREE.TorusGeometry(0.14, 0.052, 10, 18), damperMaterial);
           ring.rotation.y = Math.PI / 2;
@@ -653,11 +660,13 @@ export function WindScene({
     let lastVisualKey = "";
 
     const setCamera = (view: WindSceneProps["cameraView"]) => {
+      const sideDistance = Math.max(52, sceneDepth * 0.72);
+      const planHeight = Math.max(68, sceneExtent * 0.86);
       const targets = {
-        perspective: { position: new THREE.Vector3(arrayCenterX + 34, 27, 40), target: new THREE.Vector3(arrayCenterX, 0.3, 0) },
-        mauka: { position: new THREE.Vector3(arrayCenterX, 12, -52), target: new THREE.Vector3(arrayCenterX, 0.7, 2) },
-        makai: { position: new THREE.Vector3(arrayCenterX, 12, 52), target: new THREE.Vector3(arrayCenterX, 0.7, -2) },
-        plan: { position: new THREE.Vector3(arrayCenterX, 68, 0.01), target: new THREE.Vector3(arrayCenterX, 0, 0) },
+        perspective: { position: new THREE.Vector3(arrayCenterX + sideDistance * 0.65, sideDistance * 0.52, sideDistance * 0.76), target: new THREE.Vector3(arrayCenterX, 0.3, 0) },
+        mauka: { position: new THREE.Vector3(arrayCenterX, sideDistance * 0.23, -sideDistance), target: new THREE.Vector3(arrayCenterX, 0.7, 2) },
+        makai: { position: new THREE.Vector3(arrayCenterX, sideDistance * 0.23, sideDistance), target: new THREE.Vector3(arrayCenterX, 0.7, -2) },
+        plan: { position: new THREE.Vector3(arrayCenterX, planHeight, 0.01), target: new THREE.Vector3(arrayCenterX, 0, 0) },
       };
       camera.position.copy(targets[view].position);
       controls.target.copy(targets[view].target);
@@ -714,10 +723,10 @@ export function WindScene({
 
         const dz = z - row.z;
         const downstreamDistance = dz * flowSign;
-        const halfDepth = tableHorizontalDepth / 2;
-        const panelHeight = centerHeight - Math.tan(tilt) * dz;
+        const halfDepth = row.horizontalDepth / 2;
+        const panelHeight = row.centerHeight - Math.tan(tilt) * dz;
         const rowResult = live.result.rows[row.row - 1];
-        const columnCount = ROW_COLUMN_COUNTS[row.row - 1];
+        const columnCount = row.columns;
         const columnIndex = clamp(
           Math.round((x - row.offsetX) / modulePitch + (columnCount - 1) / 2),
           0,
@@ -741,7 +750,7 @@ export function WindScene({
             speedFactor *= 1 + contraction * crossRowAlignment * (flowSign > 0 ? 0.2 : 0.08);
             verticalVelocity += followsSlope * (flowSign > 0 ? 0.76 : 0.46);
             turbulence += rowTurbulence * crossRowAlignment * (flowSign > 0 ? 0.08 : 0.14);
-            if (live.config.mitigation === "vanes" && row.row <= live.config.vaneRowCount) {
+            if (live.config.mitigation === "vanes" && rowIsInRange(row.row, live.config.vaneStartRow, live.config.vaneEndRow, rowCount)) {
               turbulence *= 0.76;
               lateralVelocity *= 0.62;
             }
@@ -755,8 +764,8 @@ export function WindScene({
         }
 
         const wakeDistance = downstreamDistance - halfDepth;
-        if (wakeDistance > 0 && wakeDistance < ROW_SPACING_M * 1.55) {
-          const wakeDecay = Math.exp(-wakeDistance / (ROW_SPACING_M * 0.9));
+        if (wakeDistance > 0 && wakeDistance < rowSpacingM * 1.55) {
+          const wakeDecay = Math.exp(-wakeDistance / (rowSpacingM * 0.9));
           const wakeStrength = crossRowAlignment * wakeDecay;
           const vortexPhase =
             phase + elapsed * (1.15 + visualSpeed * 0.055) + wakeDistance * 2.7 + row.row * 1.23;
@@ -765,7 +774,7 @@ export function WindScene({
           lateralVelocity += Math.sin(vortexPhase) * visualSpeed * rowTurbulence * wakeStrength * 0.16;
           verticalVelocity += Math.cos(vortexPhase * 0.83) * visualSpeed * rowTurbulence * wakeStrength * 0.12;
 
-          if (live.config.mitigation === "spoilers" && row.row <= live.config.spoilerRowCount) {
+          if (live.config.mitigation === "spoilers" && rowIsInRange(row.row, live.config.spoilerStartRow, live.config.spoilerEndRow, rowCount)) {
             turbulence *= 0.82;
             verticalVelocity += visualSpeed * wakeStrength * 0.035;
           }
@@ -791,7 +800,7 @@ export function WindScene({
       const delta = Math.min(clock.getDelta(), 0.04);
       const elapsed = clock.elapsedTime;
       const live = liveRef.current;
-      const flow = getFlowComponents(live.config.windBearing);
+      const flow = getFlowComponents(live.config.windBearing, geometry);
       const normalizedFlowX = flow.x;
       const normalizedFlowZ = flow.z;
       const visualSpeed = live.config.windSpeedMph * 0.44704 * 0.19;
@@ -816,14 +825,17 @@ export function WindScene({
         live.config.screenStartRow,
         live.config.screenEndRow,
         live.config.vaneLengthM,
-        live.config.vaneRowCount,
+        live.config.vaneStartRow,
+        live.config.vaneEndRow,
         live.config.spoilerStyle,
         live.config.spoilerHeightM,
         live.config.spoilerAngleDeg,
-        live.config.spoilerRowCount,
+        live.config.spoilerStartRow,
+        live.config.spoilerEndRow,
         live.config.damperSpacingM,
         live.config.damperDampingPercent,
-        live.config.damperRowCount,
+        live.config.damperStartRow,
+        live.config.damperEndRow,
         live.selectedPanel.row,
         live.selectedPanel.module,
       ].join("-");
@@ -872,8 +884,8 @@ export function WindScene({
 
         for (const vane of vaneVisuals) {
           vane.scale.z = live.config.vaneLengthM;
-          vane.position.z = vane.userData.rowZ + tableHorizontalDepth / 2 - live.config.vaneLengthM / 2;
-          vane.visible = vane.userData.row <= live.config.vaneRowCount;
+          vane.position.z = vane.userData.rowZ + vane.userData.rowHorizontalDepth / 2 - live.config.vaneLengthM / 2;
+          vane.visible = rowIsInRange(vane.userData.row, live.config.vaneStartRow, live.config.vaneEndRow, rowCount);
         }
 
         Object.entries(spoilerStyleGroups).forEach(([style, group]) => {
@@ -885,7 +897,7 @@ export function WindScene({
           spoiler.rotation.x = THREE.MathUtils.degToRad(
             -live.config.spoilerAngleDeg + (spoiler.userData.angleOffset ?? 0),
           );
-          spoiler.visible = spoiler.userData.row <= live.config.spoilerRowCount;
+          spoiler.visible = rowIsInRange(spoiler.userData.row, live.config.spoilerStartRow, live.config.spoilerEndRow, rowCount);
         }
 
         const damperScale = 0.86 + live.config.damperDampingPercent * 0.035;
@@ -896,14 +908,14 @@ export function WindScene({
             maxDampersPerRail,
           );
           set.meshes.forEach((damper, index) => {
-            damper.visible = set.row <= live.config.damperRowCount && index < damperCount;
+            damper.visible = rowIsInRange(set.row, live.config.damperStartRow, live.config.damperEndRow, rowCount) && index < damperCount;
             damper.position.x =
               set.offsetX - set.width / 2 + index * (set.width / Math.max(1, damperCount - 1));
             damper.scale.setScalar(damperScale);
           });
         }
         damperGlows.forEach((glow, index) => {
-          glow.visible = index < live.config.damperRowCount;
+          glow.visible = rowIsInRange(index + 1, live.config.damperStartRow, live.config.damperEndRow, rowCount);
           glow.intensity = 1.1 + live.config.damperDampingPercent * 0.15;
         });
 
@@ -957,9 +969,9 @@ export function WindScene({
             if (live.showDamage && row.row <= 2) continue;
             if (Math.abs(newX - row.offsetX) > row.width / 2) continue;
             const newDz = newZ - row.z;
-            if (Math.abs(newDz) > tableHorizontalDepth / 2) continue;
-            const oldPanelHeight = centerHeight - Math.tan(tilt) * (oldZ - row.z);
-            const newPanelHeight = centerHeight - Math.tan(tilt) * newDz;
+            if (Math.abs(newDz) > row.horizontalDepth / 2) continue;
+            const oldPanelHeight = row.centerHeight - Math.tan(tilt) * (oldZ - row.z);
+            const newPanelHeight = row.centerHeight - Math.tan(tilt) * newDz;
             const crossedPanel = (oldY - oldPanelHeight) * (newY - newPanelHeight) <= 0;
             if (crossedPanel || Math.abs(newY - newPanelHeight) < 0.1) {
               const side = oldY >= oldPanelHeight ? 1 : -1;
@@ -1070,18 +1082,18 @@ export function WindScene({
       renderer.dispose();
       renderer.domElement.remove();
     };
-  }, []);
+  }, [geometryKey]);
 
   return (
     <div className="wind-scene" ref={hostRef}>
       <div className="scene-corner scene-location">
-        <span className="scene-kicker">PORTRAIT MODULES · {ROW_SPACING_M.toFixed(2)} m PITCH · {ROW_STAGGER_M.toFixed(2)} m STAGGER</span>
+        <span className="scene-kicker">PORTRAIT MODULES · {config.geometry.rowSpacingM.toFixed(2)} m PITCH · EDITABLE ROW OFFSETS</span>
         <strong>20.130687° N, 155.881243° W</strong>
         <span>58-1200 Akoni Pule Hwy · Kohala</span>
       </div>
       <div className="scene-corner scene-solver">
         <span className="solver-pulse" />
-        <span>{ROW_PANEL_COUNTS.reduce((total, panels) => total + panels, 0)}-PANEL FIELD SOLVER</span>
+        <span>{getArrayMetrics(config.geometry).totalPanelCount}-PANEL FIELD SOLVER</span>
         <strong>
           {config.mitigation === "screen"
             ? config.screenStartRow === config.screenEndRow

@@ -2,14 +2,15 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  ROW_PANEL_COUNTS,
   SCENARIOS,
-  TABLE_CHORD_M,
-  TOTAL_PANEL_COUNT,
+  getArrayBounds,
+  getScreenGeometry,
   simulate,
 } from "../app/lib/physics.ts";
+import { DEFAULT_ARRAY_CONFIG, cloneArrayConfig, getArrayMetrics } from "../app/lib/array-config.ts";
 
 const baseConfig = {
+  geometry: cloneArrayConfig(DEFAULT_ARRAY_CONFIG),
   ...SCENARIOS.storm,
   panelFrequencyHz: 2.4,
   dampingPercent: 2.5,
@@ -18,21 +19,25 @@ const baseConfig = {
   screenHeightM: 2.2,
   screenStartRow: 7,
   screenEndRow: 7,
-  vaneLengthM: TABLE_CHORD_M,
-  vaneRowCount: 1,
+  vaneLengthM: getArrayMetrics(DEFAULT_ARRAY_CONFIG).tableChordM,
+  vaneStartRow: 1,
+  vaneEndRow: 1,
   spoilerStyle: "perforated",
   spoilerHeightM: 0.3,
   spoilerAngleDeg: 20,
-  spoilerRowCount: 1,
+  spoilerStartRow: 1,
+  spoilerEndRow: 1,
   damperSpacingM: 2,
   damperDampingPercent: 5.5,
-  damperRowCount: 1,
+  damperStartRow: 1,
+  damperEndRow: 1,
 };
 
 test("resolves every physical panel and column", () => {
   const result = simulate(baseConfig);
-  assert.equal(result.rows.flatMap((row) => row.panels).length, TOTAL_PANEL_COUNT);
-  assert.deepEqual(result.rows.map((row) => row.panels.length), ROW_PANEL_COUNTS);
+  const metrics = getArrayMetrics(baseConfig.geometry);
+  assert.equal(result.rows.flatMap((row) => row.panels).length, metrics.totalPanelCount);
+  assert.deepEqual(result.rows.map((row) => row.panels.length), metrics.panelCounts);
 
   const angled = simulate({ ...baseConfig, windBearing: 60 });
   const rowFourPressures = angled.rows[3].panels.map((panel) => panel.peakUpliftKpa);
@@ -43,13 +48,15 @@ test("applies damper damping only to fitted rows", () => {
   const light = simulate({
     ...baseConfig,
     mitigation: "dampers",
-    damperRowCount: 1,
+    damperStartRow: 1,
+    damperEndRow: 1,
     damperDampingPercent: 1,
   });
   const heavy = simulate({
     ...baseConfig,
     mitigation: "dampers",
-    damperRowCount: 1,
+    damperStartRow: 1,
+    damperEndRow: 1,
     damperDampingPercent: 10,
   });
 
@@ -58,6 +65,22 @@ test("applies damper damping only to fitted rows", () => {
     assert.equal(heavy.rows[rowIndex].vibrationIndex, light.rows[rowIndex].vibrationIndex);
     assert.equal(heavy.rows[rowIndex].peakUpliftKpa, light.rows[rowIndex].peakUpliftKpa);
   }
+});
+
+test("uses inclusive placement ranges for every fitted concept", () => {
+  const baseline = simulate(baseConfig);
+  const vanes = simulate({ ...baseConfig, mitigation: "vanes", vaneStartRow: 3, vaneEndRow: 4 });
+  const spoilers = simulate({ ...baseConfig, mitigation: "spoilers", spoilerStartRow: 3, spoilerEndRow: 4 });
+  const dampers = simulate({ ...baseConfig, mitigation: "dampers", damperStartRow: 3, damperEndRow: 4, damperDampingPercent: 10 });
+
+  // Flow devices can change rows downwind through their altered wakes. The rear upwind row stays unchanged.
+  assert.equal(vanes.rows[6].peakUpliftKpa, baseline.rows[6].peakUpliftKpa);
+  assert.equal(spoilers.rows[6].peakUpliftKpa, baseline.rows[6].peakUpliftKpa);
+  assert.equal(dampers.rows[0].vibrationIndex, baseline.rows[0].vibrationIndex);
+  assert.ok(vanes.rows[2].peakUpliftKpa < baseline.rows[2].peakUpliftKpa);
+  assert.ok(spoilers.rows[3].peakUpliftKpa < baseline.rows[3].peakUpliftKpa);
+  assert.ok(dampers.rows[2].vibrationIndex < baseline.rows[2].vibrationIndex);
+  assert.ok(dampers.rows[3].vibrationIndex < baseline.rows[3].vibrationIndex);
 });
 
 test("keeps local flow devices on their fitted rows", () => {
@@ -69,6 +92,33 @@ test("keeps local flow devices on their fitted rows", () => {
       assert.equal(fitted.rows[rowIndex].peakUpliftKpa, baseline.rows[rowIndex].peakUpliftKpa);
     }
   }
+});
+
+test("makes every screen span the full array envelope", () => {
+  const bounds = getArrayBounds(baseConfig.geometry);
+  const rearScreen = getScreenGeometry(7, baseConfig.geometry);
+  const fullRowScreen = getScreenGeometry(4, baseConfig.geometry);
+
+  assert.equal(rearScreen.width, fullRowScreen.width);
+  assert.equal(rearScreen.x, fullRowScreen.x);
+  assert.ok(rearScreen.width > bounds.width);
+});
+
+test("resolves a saved custom row layout", () => {
+  const geometry = cloneArrayConfig(DEFAULT_ARRAY_CONFIG);
+  geometry.rows[0].columns = 20;
+  geometry.rows[6].columns = 11;
+  geometry.rows.push({ columns: 18, panelsDeep: 3, offsetXM: 6.2 });
+  geometry.rowSpacingM = 7.1;
+  const result = simulate({
+    ...baseConfig,
+    geometry,
+    screenStartRow: 8,
+    screenEndRow: 8,
+  });
+
+  assert.equal(result.rows.length, 8);
+  assert.deepEqual(result.rows.map((row) => row.panels.length), getArrayMetrics(geometry).panelCounts);
 });
 
 test("places screens behind an inclusive row range", () => {

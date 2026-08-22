@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import {
   Activity,
   ArrowDownRight,
@@ -25,26 +26,19 @@ import {
   Volume2,
   VolumeX,
   Wind,
+  Wrench,
   X,
 } from "lucide-react";
 import { WindScene } from "./WindScene";
 import {
-  MAUKA_BEARING,
-  HIGH_EDGE_CLEARANCE_M,
-  LOW_EDGE_CLEARANCE_M,
+  DEFAULT_ARRAY_CONFIG,
+  getArrayMetrics,
+  loadArrayConfig,
+  type ArrayGeometryConfig,
+} from "../lib/array-config";
+import {
   MITIGATIONS,
-  PANEL_LENGTH_M,
-  PANEL_TILT_DEG,
-  PANEL_WIDTH_M,
-  POST_STORM_PANEL_COUNT,
-  RACK_SUPPORTS_PER_ROW,
-  ROW_COUNT,
-  ROW_PANEL_COUNTS,
-  ROW_SPACING_M,
-  ROW_STAGGER_M,
   SCENARIOS,
-  TABLE_CHORD_M,
-  TOTAL_PANEL_COUNT,
   cardinalDirection,
   getPanelResult,
   riskColor,
@@ -67,26 +61,30 @@ const mitigationIcons: Record<MitigationId, typeof Shield> = {
 };
 
 export function WindLab() {
+  const [geometry, setGeometry] = useState<ArrayGeometryConfig>(DEFAULT_ARRAY_CONFIG);
   const [scenario, setScenario] = useState<ScenarioId | "custom">("storm");
   const [windSpeedMph, setWindSpeedMph] = useState<number>(SCENARIOS.storm.windSpeedMph);
   const [windBearing, setWindBearing] = useState<number>(SCENARIOS.storm.windBearing);
   const [ambientTurbulence, setAmbientTurbulence] = useState<number>(SCENARIOS.storm.ambientTurbulence);
-  const [panelFrequencyHz, setPanelFrequencyHz] = useState(2.4);
-  const [dampingPercent, setDampingPercent] = useState(2.5);
+  const [panelFrequencyHz, setPanelFrequencyHz] = useState(DEFAULT_ARRAY_CONFIG.naturalFrequencyHz);
+  const [dampingPercent, setDampingPercent] = useState(DEFAULT_ARRAY_CONFIG.structuralDampingPercent);
   const [mitigation, setMitigation] = useState<MitigationId>("none");
   const [screenPorosity, setScreenPorosity] = useState(40);
   const [screenHeightM, setScreenHeightM] = useState(2.2);
   const [screenStartRow, setScreenStartRow] = useState(7);
   const [screenEndRow, setScreenEndRow] = useState(7);
-  const [vaneLengthM, setVaneLengthM] = useState(Number(TABLE_CHORD_M.toFixed(2)));
-  const [vaneRowCount, setVaneRowCount] = useState(3);
+  const [vaneLengthM, setVaneLengthM] = useState(Number(getArrayMetrics(DEFAULT_ARRAY_CONFIG).tableChordM.toFixed(2)));
+  const [vaneStartRow, setVaneStartRow] = useState(1);
+  const [vaneEndRow, setVaneEndRow] = useState(3);
   const [spoilerStyle, setSpoilerStyle] = useState<SpoilerStyle>("perforated");
   const [spoilerHeightM, setSpoilerHeightM] = useState(0.3);
   const [spoilerAngleDeg, setSpoilerAngleDeg] = useState(20);
-  const [spoilerRowCount, setSpoilerRowCount] = useState(2);
+  const [spoilerStartRow, setSpoilerStartRow] = useState(1);
+  const [spoilerEndRow, setSpoilerEndRow] = useState(2);
   const [damperSpacingM, setDamperSpacingM] = useState(2);
   const [damperDampingPercent, setDamperDampingPercent] = useState(5.5);
-  const [damperRowCount, setDamperRowCount] = useState(2);
+  const [damperStartRow, setDamperStartRow] = useState(1);
+  const [damperEndRow, setDamperEndRow] = useState(2);
   const [viewMode, setViewMode] = useState<ViewMode>("flow");
   const [playing, setPlaying] = useState(true);
   const [showDamage, setShowDamage] = useState(false);
@@ -97,9 +95,29 @@ export function WindLab() {
   const [showEvidence, setShowEvidence] = useState(false);
   const [showAssumptions, setShowAssumptions] = useState(false);
   const windAudio = useWindAudio(windSpeedMph, ambientTurbulence, playing);
+  const geometryMetrics = useMemo(() => getArrayMetrics(geometry), [geometry]);
+  const rowCount = geometryMetrics.rowCount;
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      const saved = loadArrayConfig();
+      const savedMetrics = getArrayMetrics(saved);
+      setGeometry(saved);
+      setPanelFrequencyHz(saved.naturalFrequencyHz);
+      setDampingPercent(saved.structuralDampingPercent);
+      setVaneLengthM(Number(savedMetrics.tableChordM.toFixed(2)));
+      setScreenStartRow(savedMetrics.rowCount);
+      setScreenEndRow(savedMetrics.rowCount);
+      setVaneEndRow((value) => Math.min(value, savedMetrics.rowCount));
+      setSpoilerEndRow((value) => Math.min(value, savedMetrics.rowCount));
+      setDamperEndRow((value) => Math.min(value, savedMetrics.rowCount));
+      setSelectedPanel((value) => ({ row: Math.min(value.row, savedMetrics.rowCount), module: value.module }));
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, []);
 
   const config: SimulationConfig = useMemo(
     () => ({
+      geometry,
       windSpeedMph,
       windBearing,
       ambientTurbulence,
@@ -111,16 +129,20 @@ export function WindLab() {
       screenStartRow,
       screenEndRow,
       vaneLengthM,
-      vaneRowCount,
+      vaneStartRow,
+      vaneEndRow,
       spoilerStyle,
       spoilerHeightM,
       spoilerAngleDeg,
-      spoilerRowCount,
+      spoilerStartRow,
+      spoilerEndRow,
       damperSpacingM,
       damperDampingPercent,
-      damperRowCount,
+      damperStartRow,
+      damperEndRow,
     }),
     [
+      geometry,
       windSpeedMph,
       windBearing,
       ambientTurbulence,
@@ -132,14 +154,17 @@ export function WindLab() {
       screenStartRow,
       screenEndRow,
       vaneLengthM,
-      vaneRowCount,
+      vaneStartRow,
+      vaneEndRow,
       spoilerStyle,
       spoilerHeightM,
       spoilerAngleDeg,
-      spoilerRowCount,
+      spoilerStartRow,
+      spoilerEndRow,
       damperSpacingM,
       damperDampingPercent,
-      damperRowCount,
+      damperStartRow,
+      damperEndRow,
     ],
   );
   const result = useMemo(() => simulate(config), [config]);
@@ -165,22 +190,25 @@ export function WindLab() {
 
   const resetModel = () => {
     applyScenario("storm");
-    setPanelFrequencyHz(2.4);
-    setDampingPercent(2.5);
+    setPanelFrequencyHz(geometry.naturalFrequencyHz);
+    setDampingPercent(geometry.structuralDampingPercent);
     setMitigation("none");
     setScreenPorosity(40);
     setScreenHeightM(2.2);
-    setScreenStartRow(7);
-    setScreenEndRow(7);
-    setVaneLengthM(Number(TABLE_CHORD_M.toFixed(2)));
-    setVaneRowCount(3);
+    setScreenStartRow(rowCount);
+    setScreenEndRow(rowCount);
+    setVaneLengthM(Number(geometryMetrics.tableChordM.toFixed(2)));
+    setVaneStartRow(1);
+    setVaneEndRow(Math.min(3, rowCount));
     setSpoilerStyle("perforated");
     setSpoilerHeightM(0.3);
     setSpoilerAngleDeg(20);
-    setSpoilerRowCount(2);
+    setSpoilerStartRow(1);
+    setSpoilerEndRow(Math.min(2, rowCount));
     setDamperSpacingM(2);
     setDamperDampingPercent(5.5);
-    setDamperRowCount(2);
+    setDamperStartRow(1);
+    setDamperEndRow(Math.min(2, rowCount));
     setShowDamage(false);
     setViewMode("flow");
     setCamera("perspective");
@@ -209,6 +237,10 @@ export function WindLab() {
         </div>
 
         <div className="header-actions">
+          <Link className="quiet-button" href="/configuration">
+            <Wrench size={15} />
+            Array configuration
+          </Link>
           <button className="quiet-button" onClick={() => setShowEvidence(true)}>
             <Camera size={15} />
             Site evidence
@@ -308,7 +340,7 @@ export function WindLab() {
             <div>
               <span className="metric-label">WIND FROM</span>
               <strong>{cardinalDirection(windBearing)} · {windBearing}°</strong>
-              <small>{Math.abs(windBearing - MAUKA_BEARING) < 2 ? "Mauka → front" : "Custom bearing"}</small>
+              <small>{Math.abs(windBearing - geometry.maukaBearing) < 2 ? "Mauka → front" : "Custom bearing"}</small>
             </div>
           </div>
 
@@ -392,6 +424,7 @@ export function WindLab() {
               setScenario("custom");
             }}
             accent="#7df0c5"
+            markers={Object.entries(SCENARIOS).map(([id, preset]) => ({ value: preset.windSpeedMph, label: `${preset.label}: ${preset.windSpeedMph} mph`, key: id }))}
           />
           <ControlSlider
             label="Wind bearing"
@@ -405,6 +438,7 @@ export function WindLab() {
               setScenario("custom");
             }}
             accent="#8fe6ff"
+            markers={Object.entries(SCENARIOS).map(([id, preset]) => ({ value: preset.windBearing, label: `${preset.label}: ${preset.windBearing}°`, key: id }))}
           />
           <ControlSlider
             label="Ambient turbulence"
@@ -418,6 +452,7 @@ export function WindLab() {
               setScenario("custom");
             }}
             accent="#e9ef72"
+            markers={Object.entries(SCENARIOS).map(([id, preset]) => ({ value: preset.ambientTurbulence, label: `${preset.label}: ${preset.ambientTurbulence}%`, key: id }))}
           />
 
           <div className="section-rule" />
@@ -471,6 +506,7 @@ export function WindLab() {
                     onChange={setScreenPorosity}
                     accent={MITIGATIONS.screen.color}
                     compact
+                    markers={[{ value: 40, label: "Default: 40% open" }]}
                   />
                   <ControlSlider
                     label="Screen height"
@@ -482,16 +518,21 @@ export function WindLab() {
                     onChange={setScreenHeightM}
                     accent={MITIGATIONS.screen.color}
                     compact
+                    markers={[{ value: 2.2, label: "Default: 2.2 m" }]}
                   />
                   <RowRangeSlider
+                    label="Screen placement"
                     startRow={screenStartRow}
                     endRow={screenEndRow}
                     onStartChange={setScreenStartRow}
                     onEndChange={setScreenEndRow}
                     accent={MITIGATIONS.screen.color}
+                    maxRow={rowCount}
+                    defaultStart={rowCount}
+                    defaultEnd={rowCount}
                   />
                   <p>
-                    A screen sits behind each included row. Row 7 is the rear mauka row.
+                    Each screen spans the full array width. Row {rowCount} is the rear mauka row.
                   </p>
                 </>
               ) : null}
@@ -508,22 +549,23 @@ export function WindLab() {
                     onChange={setVaneLengthM}
                     accent={MITIGATIONS.vanes.color}
                     compact
+                    markers={[{ value: Number(geometryMetrics.tableChordM.toFixed(2)), label: `Default: rack chord ${geometryMetrics.tableChordM.toFixed(2)} m` }]}
                   />
-                  <ControlSlider
-                    label="Rows fitted"
-                    value={vaneRowCount}
-                    min={1}
-                    max={ROW_COUNT}
-                    step={1}
-                    unit="rows"
-                    onChange={setVaneRowCount}
+                  <RowRangeSlider
+                    label="Vane placement"
+                    startRow={vaneStartRow}
+                    endRow={vaneEndRow}
+                    onStartChange={setVaneStartRow}
+                    onEndChange={setVaneEndRow}
                     accent={MITIGATIONS.vanes.color}
-                    compact
+                    maxRow={rowCount}
+                    defaultStart={1}
+                    defaultEnd={Math.min(3, rowCount)}
                   />
                   <p>
-                    {vaneLengthM <= TABLE_CHORD_M
-                      ? `${Math.round((vaneLengthM / TABLE_CHORD_M) * 100)}% of the ${TABLE_CHORD_M.toFixed(2)} m rack slope.`
-                      : `${(vaneLengthM - TABLE_CHORD_M).toFixed(2)} m beyond the rack toward the row behind it.`}
+                    {vaneLengthM <= geometryMetrics.tableChordM
+                      ? `${Math.round((vaneLengthM / geometryMetrics.tableChordM) * 100)}% of the ${geometryMetrics.tableChordM.toFixed(2)} m rack slope.`
+                      : `${(vaneLengthM - geometryMetrics.tableChordM).toFixed(2)} m beyond the rack toward the row behind it.`}
                   </p>
                 </>
               ) : null}
@@ -556,6 +598,7 @@ export function WindLab() {
                     onChange={setSpoilerHeightM}
                     accent={MITIGATIONS.spoilers.color}
                     compact
+                    markers={[{ value: 0.3, label: "Default: 0.30 m" }]}
                   />
                   <ControlSlider
                     label="Deflector angle"
@@ -567,19 +610,20 @@ export function WindLab() {
                     onChange={setSpoilerAngleDeg}
                     accent={MITIGATIONS.spoilers.color}
                     compact
+                    markers={[{ value: 20, label: "Default: 20°" }]}
                   />
-                  <ControlSlider
-                    label="Rows fitted"
-                    value={spoilerRowCount}
-                    min={1}
-                    max={ROW_COUNT}
-                    step={1}
-                    unit="rows"
-                    onChange={setSpoilerRowCount}
+                  <RowRangeSlider
+                    label="Deflector placement"
+                    startRow={spoilerStartRow}
+                    endRow={spoilerEndRow}
+                    onStartChange={setSpoilerStartRow}
+                    onEndChange={setSpoilerEndRow}
                     accent={MITIGATIONS.spoilers.color}
-                    compact
+                    maxRow={rowCount}
+                    defaultStart={1}
+                    defaultEnd={Math.min(2, rowCount)}
                   />
-                  <p>The device sits on the makai edge. Coverage starts at Row 1.</p>
+                  <p>The device sits on the makai edge of each selected row.</p>
                 </>
               ) : null}
 
@@ -595,6 +639,7 @@ export function WindLab() {
                     onChange={setDamperSpacingM}
                     accent={MITIGATIONS.dampers.color}
                     compact
+                    markers={[{ value: 2, label: "Default: 2.0 m" }]}
                   />
                   <ControlSlider
                     label="Added damping"
@@ -606,17 +651,18 @@ export function WindLab() {
                     onChange={setDamperDampingPercent}
                     accent={MITIGATIONS.dampers.color}
                     compact
+                    markers={[{ value: 5.5, label: "Default: 5.5%" }]}
                   />
-                  <ControlSlider
-                    label="Rows fitted"
-                    value={damperRowCount}
-                    min={1}
-                    max={ROW_COUNT}
-                    step={1}
-                    unit="rows"
-                    onChange={setDamperRowCount}
+                  <RowRangeSlider
+                    label="Damper placement"
+                    startRow={damperStartRow}
+                    endRow={damperEndRow}
+                    onStartChange={setDamperStartRow}
+                    onEndChange={setDamperEndRow}
                     accent={MITIGATIONS.dampers.color}
-                    compact
+                    maxRow={rowCount}
+                    defaultStart={1}
+                    defaultEnd={Math.min(2, rowCount)}
                   />
                   <p>Magenta rings mark elastomer pads at rail-to-rack joints.</p>
                 </>
@@ -626,7 +672,7 @@ export function WindLab() {
 
           <button className="compare-button" onClick={() => setShowComparison(true)}>
             <BarChart3 size={16} />
-            Compare all concepts
+            Compare concepts against baseline
             <span>5</span>
           </button>
 
@@ -645,6 +691,7 @@ export function WindLab() {
               onChange={setPanelFrequencyHz}
               accent="#c2a8ff"
               compact
+              markers={[{ value: geometry.naturalFrequencyHz, label: `Saved default: ${geometry.naturalFrequencyHz.toFixed(1)} Hz` }]}
             />
             <ControlSlider
               label="Structural damping"
@@ -656,7 +703,9 @@ export function WindLab() {
               onChange={setDampingPercent}
               accent="#ffae6f"
               compact
+              markers={[{ value: geometry.structuralDampingPercent, label: `Saved default: ${geometry.structuralDampingPercent.toFixed(1)}%` }]}
             />
+            <p className="dynamics-warning"><strong>Uncalibrated placeholders.</strong> The 2.4 Hz default was placed near the model&apos;s 90 mph shedding estimate (about 2.7 Hz). The 2.5% damping default is a generic low-damping jointed-rack estimate. Neither value was measured here.</p>
           </details>
 
           <div className="selected-panel-card">
@@ -685,9 +734,9 @@ export function WindLab() {
       </section>
 
       <footer className="lab-footer">
-        <span><span className="status-dot" /> SITE CALIBRATION V0.7 · PANEL FIELD</span>
-        <span>JINKO 365 W · {PANEL_LENGTH_M.toFixed(3)} × {PANEL_WIDTH_M.toFixed(3)} m · {PANEL_TILT_DEG.toFixed(1)}° TILT</span>
-        <span>{TOTAL_PANEL_COUNT} PRE-STORM · R1/R7 {ROW_PANEL_COUNTS[0]} EACH · {ROW_SPACING_M.toFixed(2)} m PITCH · {ROW_STAGGER_M.toFixed(2)} m STAGGER</span>
+        <span><span className="status-dot" /> SAVED ARRAY CONFIGURATION · PANEL FIELD</span>
+        <span>JINKO 365 W · {geometry.panelLengthM.toFixed(3)} × {geometry.panelWidthM.toFixed(3)} m · {geometry.tiltDeg.toFixed(1)}° TILT</span>
+        <span>{geometryMetrics.totalPanelCount} PANELS · {rowCount} ROWS · {geometry.rowSpacingM.toFixed(2)} m PITCH · EDITABLE GEOMETRY</span>
       </footer>
 
       {showComparison ? (
@@ -696,30 +745,43 @@ export function WindLab() {
             <div className="modal-head">
               <div>
                 <span className="eyebrow">SCENARIO COMPARISON · {windSpeedMph} MPH FROM {cardinalDirection(windBearing)}</span>
-                <h2>Mitigation concept screen</h2>
-                <p>Compare the reduced-order response against the same baseline wind.</p>
+                <h2>Each concept versus one baseline</h2>
+                <p>Baseline means this saved geometry and current wind, with all mitigation removed. Each row changes only the named concept.</p>
               </div>
               <button className="icon-button" onClick={() => setShowComparison(false)} aria-label="Close comparison"><X size={18} /></button>
             </div>
-            <div className="comparison-legend"><span>Peak uplift pressure</span><span>Vibration index</span></div>
+            <div className="comparison-constants">
+              <span><small>Held constant</small><strong>{windSpeedMph} mph · {windBearing}° · {ambientTurbulence}% ambient turbulence</strong></span>
+              <span><small>Saved geometry</small><strong>{geometryMetrics.totalPanelCount} panels · {rowCount} rows · {geometry.tiltDeg.toFixed(1)}° tilt</strong></span>
+              <span><small>Dynamics</small><strong>{panelFrequencyHz.toFixed(1)} Hz · {dampingPercent.toFixed(1)}% damping</strong></span>
+            </div>
+            <div className="comparison-legend"><span>Concept and settings</span><span>Peak uplift</span><span>Vibration</span><span>Peak location</span><span>Action</span></div>
             <div className="comparison-list">
               {comparisons.map(({ id, result: item }) => {
-                const reduction = 100 * (1 - item.vibrationIndex / Math.max(baselineResult.vibrationIndex, 0.01));
+                const pressureDelta = 100 * (item.peakUpliftKpa / Math.max(baselineResult.peakUpliftKpa, 0.01) - 1);
+                const vibrationDelta = 100 * (item.vibrationIndex / Math.max(baselineResult.vibrationIndex, 0.01) - 1);
                 return (
-                  <button key={id} className={mitigation === id ? "active" : ""} onClick={() => setMitigation(id)}>
+                  <article key={id} className={mitigation === id ? "active" : ""}>
                     <span className="comparison-name">
                       {MITIGATIONS[id].label}
-                      <small>{id === "none" ? "Reference" : `${Math.max(0, reduction).toFixed(0)}% vibration reduction`}</small>
+                      <small>{getMitigationSummary(id, config)}</small>
                     </span>
-                    <span className="bar-track"><i style={{ width: `${clampPercent(item.peakUpliftKpa / baselineResult.peakUpliftKpa * 100)}%` }} /></span>
-                    <strong>{item.peakUpliftKpa.toFixed(2)} kPa</strong>
-                    <span className="bar-track vibration"><i style={{ width: `${clampPercent(item.vibrationIndex)}%` }} /></span>
-                    <strong>{item.vibrationIndex.toFixed(0)}</strong>
-                  </button>
+                    <span className="comparison-value"><strong>{item.peakUpliftKpa.toFixed(2)} kPa</strong><small>{id === "none" ? "Baseline" : formatDelta(pressureDelta)}</small></span>
+                    <span className="comparison-value"><strong>{item.vibrationIndex.toFixed(0)} / 100</strong><small>{id === "none" ? "Baseline" : formatDelta(vibrationDelta)}</small></span>
+                    <span className="comparison-value"><strong>Row {item.peakRow} · Col {item.peakColumn}</strong><small>highest uplift panel</small></span>
+                    <button type="button" onClick={() => { setMitigation(id); setShowComparison(false); }}>{mitigation === id ? "Active" : "Use concept"}</button>
+                  </article>
                 );
               })}
             </div>
-            <div className="modal-caution"><Info size={16} /> Rank these concepts with CFD and a structural modal test before construction.</div>
+            <div className="comparison-candidates">
+              <strong>Other candidates to evaluate</strong>
+              <span>Rack cross-bracing and shorter rail spans</span>
+              <span>Positive-locking fasteners with a torque-inspection plan</span>
+              <span>Edge-row reinforcement or a rebuild with a different tilt</span>
+              <span>Pressure-equalization gaps, only after CFD and wind-tunnel checks</span>
+            </div>
+            <div className="modal-caution"><Info size={16} /> These are screening estimates. Use CFD, wind-tunnel work, and a structural modal test before construction.</div>
           </section>
         </div>
       ) : null}
@@ -739,7 +801,7 @@ export function WindLab() {
               <figure>
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src="/reference/satellite.png" alt="Satellite view of the facility and the large solar array" />
-                <figcaption><strong>North-up site view</strong><span>{ROW_SPACING_M.toFixed(2)} m row pitch · {ROW_STAGGER_M.toFixed(2)} m southeast stagger</span></figcaption>
+                <figcaption><strong>North-up site view</strong><span>{geometry.rowSpacingM.toFixed(2)} m row pitch · saved per-row southeast offsets</span></figcaption>
               </figure>
               <figure>
                 {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -762,12 +824,13 @@ export function WindLab() {
               <button className="icon-button" onClick={() => setShowAssumptions(false)} aria-label="Close assumptions"><X size={18} /></button>
             </div>
             <div className="assumption-grid">
-              <article><span>01</span><h3>Photo-counted geometry</h3><p>Rows 1 and 7 have 14 southeast-aligned columns. Rows 2–6 have 28 columns. Each table uses two portrait panels along the slope.</p></article>
-              <article><span>07</span><h3>Staggered row layout</h3><p>The rows form a southeast echelon. Each rearward row shifts {ROW_STAGGER_M.toFixed(2)} m southeast. Row centers use a {ROW_SPACING_M.toFixed(2)} m pitch.</p></article>
-              <article><span>02</span><h3>Panel flow field</h3><p>The solver evaluates all {TOTAL_PANEL_COUNT} panels. It tracks angled wake overlap, exposed columns, row stagger, screen shelter, and wake decay.</p></article>
+              <article><span>01</span><h3>Saved geometry</h3><p>The configuration page controls panel counts, row offsets, spacing, panel dimensions, tilt, clearance, bearings, and rack assumptions.</p></article>
+              <article><span>07</span><h3>Staggered row layout</h3><p>The rows use individual horizontal offsets. Row centers use a {geometry.rowSpacingM.toFixed(2)} m pitch.</p></article>
+              <article><span>02</span><h3>Panel flow field</h3><p>The solver evaluates all {geometryMetrics.totalPanelCount} panels. It tracks angled wake overlap, exposed columns, row offset, screen shelter, and wake decay.</p></article>
               <article><span>03</span><h3>Local vibration</h3><p>Each panel uses its local turbulence and pressure. Dampers change only the fitted rows. This model is not full CFD.</p></article>
-              <article><span>04</span><h3>Array totals</h3><p>The estimate has {TOTAL_PANEL_COUNT} panels before the storm. It has {POST_STORM_PANEL_COUNT} after Rows 1 and 2 are removed.</p></article>
-              <article><span>05</span><h3>Estimated rack</h3><p>The rack uses a {TABLE_CHORD_M.toFixed(2)} m slope and {LOW_EDGE_CLEARANCE_M.toFixed(2)}–{HIGH_EDGE_CLEARANCE_M.toFixed(2)} m clearance. Full rows use {RACK_SUPPORTS_PER_ROW} support frames and four rails.</p></article>
+              <article><span>04</span><h3>Array totals</h3><p>The saved layout has {geometryMetrics.totalPanelCount} panels. It has {geometryMetrics.panelCounts.slice(2).reduce((sum, count) => sum + count, 0)} after Rows 1 and 2 are removed.</p></article>
+              <article><span>05</span><h3>Estimated rack</h3><p>The rack uses a {geometryMetrics.tableChordM.toFixed(2)} m maximum slope and {geometry.lowEdgeClearanceM.toFixed(2)}–{geometryMetrics.highEdgeClearanceM.toFixed(2)} m clearance. A full row uses {geometry.rackSupportsFullRow} support frames and four rails.</p></article>
+              <article><span>08</span><h3>Uncalibrated dynamics</h3><p>The original 2.4 Hz default was chosen near f = 0.13V/L for a 90 mph gust, about 2.7 Hz. The 2.5% damping default is a generic low-damping estimate. Both need modal-test measurements.</p></article>
               <article><span>06</span><h3>Recorded wind</h3><p>The sound control uses the CC0 “Steady wind” recording from the USC/Sunset sound-effects collection. Speed controls its gain and playback rate.</p></article>
             </div>
             <div className="modal-caution"><Info size={16} /> Do not use these values for final structural design or manufacturer compliance.</div>
@@ -791,29 +854,62 @@ function Metric({ label, value, unit, note, color }: { label: string; value: str
   );
 }
 
+function formatRowRange(start: number, end: number) {
+  return start === end ? `Row ${start}` : `Rows ${start}–${end}`;
+}
+
+function getMitigationSummary(id: MitigationId, config: SimulationConfig) {
+  if (id === "none") return "Reference: no screen, vanes, deflectors, or dampers";
+  if (id === "screen") {
+    return `${formatRowRange(config.screenStartRow, config.screenEndRow)} · ${config.screenPorosity}% open · ${config.screenHeightM.toFixed(1)} m high · full-array width`;
+  }
+  if (id === "vanes") {
+    return `${formatRowRange(config.vaneStartRow, config.vaneEndRow)} · ${config.vaneLengthM.toFixed(2)} m long`;
+  }
+  if (id === "spoilers") {
+    return `${formatRowRange(config.spoilerStartRow, config.spoilerEndRow)} · ${config.spoilerStyle} · ${config.spoilerHeightM.toFixed(2)} m · ${config.spoilerAngleDeg}°`;
+  }
+  return `${formatRowRange(config.damperStartRow, config.damperEndRow)} · ${config.damperSpacingM.toFixed(1)} m spacing · +${config.damperDampingPercent.toFixed(1)}% damping`;
+}
+
+function formatDelta(value: number) {
+  if (Math.abs(value) < 0.05) return "No change vs baseline";
+  return `${Math.abs(value).toFixed(0)}% ${value < 0 ? "lower" : "higher"} vs baseline`;
+}
+
 function RowRangeSlider({
+  label,
   startRow,
   endRow,
   onStartChange,
   onEndChange,
   accent,
+  maxRow,
+  defaultStart,
+  defaultEnd,
 }: {
+  label: string;
   startRow: number;
   endRow: number;
   onStartChange: (value: number) => void;
   onEndChange: (value: number) => void;
   accent: string;
+  maxRow: number;
+  defaultStart: number;
+  defaultEnd: number;
 }) {
   const min = 1;
-  const max = ROW_COUNT;
-  const startPercent = ((startRow - min) / (max - min)) * 100;
-  const endPercent = ((endRow - min) / (max - min)) * 100;
+  const max = maxRow;
+  const denominator = Math.max(1, max - min);
+  const startPercent = ((startRow - min) / denominator) * 100;
+  const endPercent = ((endRow - min) / denominator) * 100;
   const rangeLabel = startRow === endRow ? `Row ${startRow}` : `Rows ${startRow}–${endRow}`;
+  const defaultPercent = ((defaultStart - min) / denominator) * 100;
 
   return (
     <fieldset className="row-range-control">
       <legend>
-        <span>Screen placement</span>
+        <span>{label}</span>
         <strong>{rangeLabel}</strong>
       </legend>
       <div
@@ -849,10 +945,24 @@ function RowRangeSlider({
           onChange={(event) => onEndChange(Math.max(Number(event.target.value), startRow))}
           style={{ zIndex: 2 }}
         />
+        <button
+          type="button"
+          className="range-default-marker"
+          style={{ left: `${defaultPercent}%` }}
+          onClick={() => {
+            onStartChange(defaultStart);
+            onEndChange(defaultEnd);
+          }}
+          aria-label={`Restore default placement, rows ${defaultStart} to ${defaultEnd}`}
+          title={`Default: ${defaultStart === defaultEnd ? `Row ${defaultStart}` : `Rows ${defaultStart}–${defaultEnd}`}`}
+        />
       </div>
       <div className="row-range-labels">
         <span>ROW 1 · FRONT</span>
-        <span>ROW 7 · REAR</span>
+        <button type="button" onClick={() => { onStartChange(defaultStart); onEndChange(defaultEnd); }}>
+          Default {defaultStart === defaultEnd ? defaultStart : `${defaultStart}–${defaultEnd}`}
+        </button>
+        <span>ROW {max} · REAR</span>
       </div>
     </fieldset>
   );
@@ -868,6 +978,7 @@ function ControlSlider({
   onChange,
   accent,
   compact = false,
+  markers = [],
 }: {
   label: string;
   value: number;
@@ -878,14 +989,16 @@ function ControlSlider({
   onChange: (value: number) => void;
   accent: string;
   compact?: boolean;
+  markers?: Array<{ value: number; label: string; key?: string }>;
 }) {
   const percent = ((value - min) / (max - min)) * 100;
   const decimalPlaces = step >= 1 ? 0 : Math.min(2, (step.toString().split(".")[1] ?? "").length);
   const displayValue = value.toFixed(decimalPlaces);
   return (
-    <label className={`control-slider ${compact ? "compact" : ""}`}>
+    <div className={`control-slider ${compact ? "compact" : ""}`}>
       <span><span>{label}</span><strong>{displayValue}<small>{unit}</small></strong></span>
       <input
+        aria-label={label}
         type="range"
         min={min}
         max={max}
@@ -894,13 +1007,23 @@ function ControlSlider({
         onChange={(event) => onChange(Number(event.target.value))}
         style={{ "--slider-fill": `${percent}%`, "--slider-accent": accent } as React.CSSProperties}
       />
+      {markers.length ? (
+        <div className="slider-markers" aria-label={`${label} preset points`}>
+          {markers.map((marker, index) => (
+            <button
+              type="button"
+              key={`${marker.key ?? marker.value}-${index}`}
+              style={{ left: `${Math.min(100, Math.max(0, ((marker.value - min) / (max - min)) * 100))}%` }}
+              onClick={() => onChange(marker.value)}
+              aria-label={marker.label}
+              title={marker.label}
+            />
+          ))}
+        </div>
+      ) : null}
       {!compact ? <div className="range-labels"><span>{min}</span><span>{max}</span></div> : null}
-    </label>
+    </div>
   );
-}
-
-function clampPercent(value: number) {
-  return Math.min(100, Math.max(3, value));
 }
 
 function useWindAudio(windSpeedMph: number, ambientTurbulence: number, playing: boolean) {
