@@ -22,9 +22,9 @@ export type ArrayGeometryConfig = {
   structuralDampingPercent: number;
 };
 
-export const ARRAY_CONFIG_STORAGE_KEY = "kohala-array-configuration-v1";
+export const ARRAY_CONFIG_STORAGE_KEY = "kohala-array-configuration-v2";
 
-const DEFAULT_ROW_OFFSETS_M = [2.469, -3.1, -1.55, 0, 1.55, 3.1, 11.769];
+const DEFAULT_ROW_OFFSETS_M = [4.019, -3.1, -1.55, 0, 1.55, 3.1, 10.219];
 const DEFAULT_ROW_COLUMNS = [14, 28, 28, 28, 28, 28, 14];
 
 export const DEFAULT_ARRAY_CONFIG: ArrayGeometryConfig = {
@@ -45,8 +45,8 @@ export const DEFAULT_ARRAY_CONFIG: ArrayGeometryConfig = {
   screenRowOffsetM: 3.225,
   arrayAxisBearing: 130,
   maukaBearing: 40,
-  naturalFrequencyHz: 2.4,
-  structuralDampingPercent: 2.5,
+  naturalFrequencyHz: 2.9,
+  structuralDampingPercent: 1.1,
 };
 
 const clamp = (value: number, min: number, max: number) =>

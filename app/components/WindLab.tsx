@@ -10,7 +10,6 @@ import {
   ChevronDown,
   CircleGauge,
   Eye,
-  EyeOff,
   Gauge,
   Grid3X3,
   Info,
@@ -29,7 +28,7 @@ import {
   Wrench,
   X,
 } from "lucide-react";
-import { WindScene } from "./WindScene";
+import { WindScene, type ArrayState } from "./WindScene";
 import {
   DEFAULT_ARRAY_CONFIG,
   getArrayMetrics,
@@ -62,7 +61,7 @@ const mitigationIcons: Record<MitigationId, typeof Shield> = {
 
 export function WindLab() {
   const [geometry, setGeometry] = useState<ArrayGeometryConfig>(DEFAULT_ARRAY_CONFIG);
-  const [scenario, setScenario] = useState<ScenarioId | "custom">("storm");
+  const [scenario, setScenario] = useState<ScenarioId>("storm");
   const [windSpeedMph, setWindSpeedMph] = useState<number>(SCENARIOS.storm.windSpeedMph);
   const [windBearing, setWindBearing] = useState<number>(SCENARIOS.storm.windBearing);
   const [ambientTurbulence, setAmbientTurbulence] = useState<number>(SCENARIOS.storm.ambientTurbulence);
@@ -87,7 +86,7 @@ export function WindLab() {
   const [damperEndRow, setDamperEndRow] = useState(2);
   const [viewMode, setViewMode] = useState<ViewMode>("flow");
   const [playing, setPlaying] = useState(true);
-  const [showDamage, setShowDamage] = useState(false);
+  const [arrayState, setArrayState] = useState<ArrayState>("restored");
   const [cameraView, setCameraView] = useState<"perspective" | "mauka" | "makai" | "plan">("perspective");
   const [cameraRequest, setCameraRequest] = useState(0);
   const [selectedPanel, setSelectedPanel] = useState({ row: 1, module: 9 });
@@ -209,7 +208,7 @@ export function WindLab() {
     setDamperDampingPercent(5.5);
     setDamperStartRow(1);
     setDamperEndRow(Math.min(2, rowCount));
-    setShowDamage(false);
+    setArrayState("restored");
     setViewMode("flow");
     setCamera("perspective");
   };
@@ -308,7 +307,7 @@ export function WindLab() {
             result={result}
             viewMode={viewMode}
             playing={playing}
-            showDamage={showDamage}
+            arrayState={arrayState}
             cameraView={cameraView}
             cameraRequest={cameraRequest}
             selectedPanel={selectedPanel}
@@ -344,10 +343,16 @@ export function WindLab() {
             </div>
           </div>
 
-          <button className="damage-toggle" onClick={() => setShowDamage((value) => !value)}>
-            {showDamage ? <EyeOff size={15} /> : <Eye size={15} />}
-            {showDamage ? "Restore pre-storm array" : "Show post-storm damage"}
-          </button>
+          <label className="array-state-select">
+            <Eye size={15} />
+            <span>Site condition</span>
+            <select value={arrayState} onChange={(event) => setArrayState(event.target.value as ArrayState)}>
+              <option value="immediate">Immediate storm damage</option>
+              <option value="repaired">Post-storm cleanup</option>
+              <option value="restored">Fully restored array</option>
+            </select>
+            <ChevronDown size={14} aria-hidden="true" />
+          </label>
 
           <div className="metrics-rack">
             <Metric
@@ -397,13 +402,8 @@ export function WindLab() {
             <div>
               <select
                 value={scenario}
-                onChange={(event) => {
-                  const value = event.target.value as ScenarioId | "custom";
-                  if (value === "custom") setScenario("custom");
-                  else applyScenario(value);
-                }}
+                onChange={(event) => applyScenario(event.target.value as ScenarioId)}
               >
-                <option value="custom">Custom configuration</option>
                 {Object.entries(SCENARIOS).map(([id, preset]) => (
                   <option value={id} key={id}>{preset.label} · {preset.note}</option>
                 ))}
@@ -419,12 +419,11 @@ export function WindLab() {
             max={150}
             step={1}
             unit="mph"
-            onChange={(value) => {
-              setWindSpeedMph(value);
-              setScenario("custom");
-            }}
+            onChange={setWindSpeedMph}
             accent="#7df0c5"
-            markers={Object.entries(SCENARIOS).map(([id, preset]) => ({ value: preset.windSpeedMph, label: `${preset.label}: ${preset.windSpeedMph} mph`, key: id }))}
+            markers={[{ value: SCENARIOS[scenario].windSpeedMph, label: `${SCENARIOS[scenario].label}: ${SCENARIOS[scenario].windSpeedMph} mph`, key: scenario }]}
+            snapValue={SCENARIOS[scenario].windSpeedMph}
+            snapTolerance={3}
           />
           <ControlSlider
             label="Wind bearing"
@@ -433,12 +432,11 @@ export function WindLab() {
             max={359}
             step={1}
             unit={`° ${cardinalDirection(windBearing)}`}
-            onChange={(value) => {
-              setWindBearing(value);
-              setScenario("custom");
-            }}
+            onChange={setWindBearing}
             accent="#8fe6ff"
-            markers={Object.entries(SCENARIOS).map(([id, preset]) => ({ value: preset.windBearing, label: `${preset.label}: ${preset.windBearing}°`, key: id }))}
+            markers={[{ value: SCENARIOS[scenario].windBearing, label: `${SCENARIOS[scenario].label}: ${SCENARIOS[scenario].windBearing}°`, key: scenario }]}
+            snapValue={SCENARIOS[scenario].windBearing}
+            snapTolerance={4}
           />
           <ControlSlider
             label="Ambient turbulence"
@@ -447,12 +445,11 @@ export function WindLab() {
             max={35}
             step={1}
             unit="%"
-            onChange={(value) => {
-              setAmbientTurbulence(value);
-              setScenario("custom");
-            }}
+            onChange={setAmbientTurbulence}
             accent="#e9ef72"
-            markers={Object.entries(SCENARIOS).map(([id, preset]) => ({ value: preset.ambientTurbulence, label: `${preset.label}: ${preset.ambientTurbulence}%`, key: id }))}
+            markers={[{ value: SCENARIOS[scenario].ambientTurbulence, label: `${SCENARIOS[scenario].label}: ${SCENARIOS[scenario].ambientTurbulence}%`, key: scenario }]}
+            snapValue={SCENARIOS[scenario].ambientTurbulence}
+            snapTolerance={2}
           />
 
           <div className="section-rule" />
@@ -705,7 +702,7 @@ export function WindLab() {
               compact
               markers={[{ value: geometry.structuralDampingPercent, label: `Saved default: ${geometry.structuralDampingPercent.toFixed(1)}%` }]}
             />
-            <p className="dynamics-warning"><strong>Uncalibrated placeholders.</strong> The 2.4 Hz default was placed near the model&apos;s 90 mph shedding estimate (about 2.7 Hz). The 2.5% damping default is a generic low-damping jointed-rack estimate. Neither value was measured here.</p>
+            <p className="dynamics-warning"><strong>Research defaults, not site measurements.</strong> Field tests on a tracking PV rack found 2.9–5.0 Hz torsional modes and 1.07–2.99% damping. This model uses the conservative lower limits: 2.9 Hz and 1.1%.</p>
           </details>
 
           <div className="selected-panel-card">
@@ -793,7 +790,7 @@ export function WindLab() {
               <div>
                 <span className="eyebrow">SOURCE IMAGERY</span>
                 <h2>Geometry and failure evidence</h2>
-                <p>The model uses these two supplied site images.</p>
+                <p>The model uses the satellite image, the cleaned condition, and four immediate damage views.</p>
               </div>
               <button className="icon-button" onClick={() => setShowEvidence(false)} aria-label="Close evidence"><X size={18} /></button>
             </div>
@@ -806,7 +803,27 @@ export function WindLab() {
               <figure>
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src="/reference/post-storm.png" alt="Post-storm image showing the first two rows removed" />
-                <figcaption><strong>Post-storm condition</strong><span>Rows 1–2 removed · rear rows remain</span></figcaption>
+                <figcaption><strong>Post-storm cleanup</strong><span>Rows 1–2 removed · intact modules consolidated into Rows 3–7</span></figcaption>
+              </figure>
+              <figure>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src="/reference/damage-from-front.png" alt="Immediate storm damage seen from the front of the array" />
+                <figcaption><strong>Immediate damage · front</strong><span>Collapsed front racks, overlapping modules, and gaps into Row 3</span></figcaption>
+              </figure>
+              <figure>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src="/reference/damage-from-front-right.png" alt="Immediate storm damage seen from the front right" />
+                <figcaption><strong>Immediate damage · front right</strong><span>Flat debris, folded modules, and upright panels near the southeast end</span></figcaption>
+              </figure>
+              <figure>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src="/reference/damage-from-front-right-corner.png" alt="Close view of immediate storm damage at the front right corner" />
+                <figcaption><strong>Immediate damage · corner</strong><span>Cracked glass, twisted rails, and stacked modules on basalt gravel</span></figcaption>
+              </figure>
+              <figure>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src="/reference/damage-from-makai.png" alt="Distant immediate storm damage view from the makai side" />
+                <figcaption><strong>Immediate damage · makai overview</strong><span>Gravel pad, perimeter fence, dry field, rock wall, and debris outside the front row</span></figcaption>
               </figure>
             </div>
           </section>
@@ -829,8 +846,8 @@ export function WindLab() {
               <article><span>02</span><h3>Panel flow field</h3><p>The solver evaluates all {geometryMetrics.totalPanelCount} panels. It tracks angled wake overlap, exposed columns, row offset, screen shelter, and wake decay.</p></article>
               <article><span>03</span><h3>Local vibration</h3><p>Each panel uses its local turbulence and pressure. Dampers change only the fitted rows. This model is not full CFD.</p></article>
               <article><span>04</span><h3>Array totals</h3><p>The saved layout has {geometryMetrics.totalPanelCount} panels. It has {geometryMetrics.panelCounts.slice(2).reduce((sum, count) => sum + count, 0)} after Rows 1 and 2 are removed.</p></article>
-              <article><span>05</span><h3>Estimated rack</h3><p>The rack uses a {geometryMetrics.tableChordM.toFixed(2)} m maximum slope and {geometry.lowEdgeClearanceM.toFixed(2)}–{geometryMetrics.highEdgeClearanceM.toFixed(2)} m clearance. A full row uses {geometry.rackSupportsFullRow} support frames and four rails.</p></article>
-              <article><span>08</span><h3>Uncalibrated dynamics</h3><p>The original 2.4 Hz default was chosen near f = 0.13V/L for a 90 mph gust, about 2.7 Hz. The 2.5% damping default is a generic low-damping estimate. Both need modal-test measurements.</p></article>
+              <article><span>05</span><h3>Estimated rack and site</h3><p>The rack uses a {geometryMetrics.tableChordM.toFixed(2)} m maximum slope and {geometry.lowEdgeClearanceM.toFixed(2)}–{geometryMetrics.highEdgeClearanceM.toFixed(2)} m clearance. The model puts the basalt wall 3.2 m beyond Row 1&apos;s low edge.</p></article>
+              <article><span>08</span><h3>Research-based dynamics</h3><p>The defaults use the low end of field tests on a tracking PV rack: 2.9 Hz torsional frequency and 1.1% damping. This fixed rack still needs a site modal test.</p></article>
               <article><span>06</span><h3>Recorded wind</h3><p>The sound control uses the CC0 “Steady wind” recording from the USC/Sunset sound-effects collection. Speed controls its gain and playback rate.</p></article>
             </div>
             <div className="modal-caution"><Info size={16} /> Do not use these values for final structural design or manufacturer compliance.</div>
@@ -979,6 +996,8 @@ function ControlSlider({
   accent,
   compact = false,
   markers = [],
+  snapValue,
+  snapTolerance = 0,
 }: {
   label: string;
   value: number;
@@ -990,6 +1009,8 @@ function ControlSlider({
   accent: string;
   compact?: boolean;
   markers?: Array<{ value: number; label: string; key?: string }>;
+  snapValue?: number;
+  snapTolerance?: number;
 }) {
   const percent = ((value - min) / (max - min)) * 100;
   const decimalPlaces = step >= 1 ? 0 : Math.min(2, (step.toString().split(".")[1] ?? "").length);
@@ -1004,7 +1025,10 @@ function ControlSlider({
         max={max}
         step={step}
         value={value}
-        onChange={(event) => onChange(Number(event.target.value))}
+        onChange={(event) => {
+          const next = Number(event.target.value);
+          onChange(snapValue !== undefined && Math.abs(next - snapValue) <= snapTolerance ? snapValue : next);
+        }}
         style={{ "--slider-fill": `${percent}%`, "--slider-accent": accent } as React.CSSProperties}
       />
       {markers.length ? (

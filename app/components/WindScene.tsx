@@ -22,13 +22,14 @@ import {
 } from "../lib/physics";
 
 type SelectedPanel = { row: number; module: number };
+export type ArrayState = "immediate" | "repaired" | "restored";
 
 type WindSceneProps = {
   config: SimulationConfig;
   result: SimulationResult;
   viewMode: ViewMode;
   playing: boolean;
-  showDamage: boolean;
+  arrayState: ArrayState;
   cameraView: "perspective" | "mauka" | "makai" | "plan";
   cameraRequest: number;
   selectedPanel: SelectedPanel;
@@ -41,6 +42,18 @@ type PanelVisual = {
   row: number;
   module: number;
   baseRotationX: number;
+  basePosition: THREE.Vector3;
+  immediatePosition: THREE.Vector3;
+  immediateRotation: THREE.Euler;
+  immediateDamaged: boolean;
+  crack?: THREE.Mesh;
+};
+
+type RackVisual = {
+  object: THREE.Object3D;
+  row: number;
+  basePosition: THREE.Vector3;
+  baseQuaternion: THREE.Quaternion;
 };
 
 type FlowSample = {
@@ -53,6 +66,10 @@ type FlowSample = {
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 const approximateGaussian = () =>
   (Math.random() + Math.random() + Math.random() + Math.random() - 2) * 1.73;
+const hash = (value: number) => {
+  const raw = Math.sin(value * 12.9898 + 78.233) * 43758.5453;
+  return raw - Math.floor(raw);
+};
 
 function makePanelTexture(renderer: THREE.WebGLRenderer) {
   const canvas = document.createElement("canvas");
@@ -105,6 +122,60 @@ function makeGroundTexture(renderer: THREE.WebGLRenderer) {
   texture.repeat.set(8, 8);
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+  return texture;
+}
+
+function makeFieldTexture(renderer: THREE.WebGLRenderer) {
+  const canvas = document.createElement("canvas");
+  canvas.width = 512;
+  canvas.height = 512;
+  const context = canvas.getContext("2d");
+  if (!context) return null;
+  context.fillStyle = "#706a3d";
+  context.fillRect(0, 0, 512, 512);
+  for (let index = 0; index < 9000; index += 1) {
+    const warm = 92 + Math.floor(Math.random() * 54);
+    context.strokeStyle = `rgba(${warm + 34}, ${warm + 19}, ${Math.max(34, warm - 32)}, ${0.12 + Math.random() * 0.24})`;
+    context.beginPath();
+    const x = Math.random() * 512;
+    const y = Math.random() * 512;
+    context.moveTo(x, y);
+    context.lineTo(x + (Math.random() - 0.5) * 3, y - 2 - Math.random() * 5);
+    context.stroke();
+  }
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+  texture.repeat.set(18, 12);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+  return texture;
+}
+
+function makeSkyTexture() {
+  const canvas = document.createElement("canvas");
+  canvas.width = 1024;
+  canvas.height = 512;
+  const context = canvas.getContext("2d");
+  if (!context) return null;
+  const sky = context.createLinearGradient(0, 0, 0, 512);
+  sky.addColorStop(0, "#71848e");
+  sky.addColorStop(0.45, "#9eacb0");
+  sky.addColorStop(1, "#d3d0bf");
+  context.fillStyle = sky;
+  context.fillRect(0, 0, 1024, 512);
+  for (let index = 0; index < 140; index += 1) {
+    const x = hash(index + 31) * 1024;
+    const y = 55 + hash(index + 82) * 250;
+    const width = 55 + hash(index + 143) * 190;
+    const height = 14 + hash(index + 207) * 42;
+    const shade = 128 + Math.floor(hash(index + 281) * 72);
+    context.fillStyle = `rgba(${shade}, ${shade + 3}, ${shade + 4}, ${0.025 + hash(index + 353) * 0.12})`;
+    context.beginPath();
+    context.ellipse(x, y, width, height, hash(index + 401) * 0.35, 0, Math.PI * 2);
+    context.fill();
+  }
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
   return texture;
 }
 
@@ -163,7 +234,7 @@ export function WindScene({
   result,
   viewMode,
   playing,
-  showDamage,
+  arrayState,
   cameraView,
   cameraRequest,
   selectedPanel,
@@ -176,7 +247,7 @@ export function WindScene({
     result,
     viewMode,
     playing,
-    showDamage,
+    arrayState,
     cameraView,
     cameraRequest,
     selectedPanel,
@@ -189,13 +260,13 @@ export function WindScene({
       result,
       viewMode,
       playing,
-      showDamage,
+      arrayState,
       cameraView,
       cameraRequest,
       selectedPanel,
       onSelectPanel,
     };
-  }, [config, result, viewMode, playing, showDamage, cameraView, cameraRequest, selectedPanel, onSelectPanel]);
+  }, [config, result, viewMode, playing, arrayState, cameraView, cameraRequest, selectedPanel, onSelectPanel]);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -209,6 +280,7 @@ export function WindScene({
     const panelThicknessM = geometry.panelThicknessM;
     const tableChordM = geometryMetrics.tableChordM;
     const rowSpacingM = geometry.rowSpacingM;
+    const tilt = THREE.MathUtils.degToRad(geometry.tiltDeg);
     const arrayBounds = getArrayBounds(geometry);
     const arrayCenterX = arrayBounds.centerX;
     const sceneWidth = Math.max(92, arrayBounds.width + 26);
@@ -216,8 +288,8 @@ export function WindScene({
     const sceneExtent = Math.max(sceneWidth, sceneDepth);
 
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x071219);
-    scene.fog = new THREE.FogExp2(0x071219, 0.0135);
+    scene.background = new THREE.Color(0x9aa9aa);
+    scene.fog = new THREE.FogExp2(0xa8b2ae, 0.0055);
 
     const camera = new THREE.PerspectiveCamera(42, 1, 0.1, Math.max(180, sceneExtent * 4));
     camera.position.set(35, 27, 40);
@@ -239,8 +311,8 @@ export function WindScene({
     controls.maxPolarAngle = Math.PI * 0.485;
     controls.target.set(0, 0.3, 0);
 
-    scene.add(new THREE.HemisphereLight(0xbce9ff, 0x172018, 1.55));
-    const sun = new THREE.DirectionalLight(0xfff3d2, 3.1);
+    scene.add(new THREE.HemisphereLight(0xdce8eb, 0x433f28, 1.75));
+    const sun = new THREE.DirectionalLight(0xfff0d2, 2.65);
     sun.position.set(-22, 34, -16);
     sun.castShadow = true;
     sun.shadow.mapSize.set(2048, 2048);
@@ -249,37 +321,123 @@ export function WindScene({
     sun.shadow.camera.top = 42;
     sun.shadow.camera.bottom = -42;
     scene.add(sun);
-    const rim = new THREE.DirectionalLight(0x54d9ff, 1.2);
+    const rim = new THREE.DirectionalLight(0x8bc9d8, 0.75);
     rim.position.set(24, 8, 30);
     scene.add(rim);
 
+    const skyTexture = makeSkyTexture();
+    const sky = new THREE.Mesh(
+      new THREE.SphereGeometry(230, 48, 24),
+      new THREE.MeshBasicMaterial({ map: skyTexture, side: THREE.BackSide, fog: false }),
+    );
+    sky.position.y = 14;
+    scene.add(sky);
+
+    const fieldTexture = makeFieldTexture(renderer);
+    const field = new THREE.Mesh(
+      new THREE.PlaneGeometry(240, 155),
+      new THREE.MeshStandardMaterial({ map: fieldTexture, color: 0x9a8c51, roughness: 1 }),
+    );
+    field.rotation.x = -Math.PI / 2;
+    field.position.set(arrayCenterX, -0.09, -23);
+    field.receiveShadow = true;
+    scene.add(field);
+
     const groundTexture = makeGroundTexture(renderer);
+    const gravelDepth = (rowCount - 1) * rowSpacingM + tableChordM + 12;
+    const gravelWidth = arrayBounds.width + 14;
     const ground = new THREE.Mesh(
-      new THREE.PlaneGeometry(sceneWidth, sceneDepth, 1, 1),
-      new THREE.MeshStandardMaterial({ map: groundTexture, color: 0x52605b, roughness: 0.97, metalness: 0.02 }),
+      new THREE.PlaneGeometry(gravelWidth, gravelDepth, 1, 1),
+      new THREE.MeshStandardMaterial({ map: groundTexture, color: 0x5a615d, roughness: 0.99, metalness: 0.01 }),
     );
     ground.rotation.x = -Math.PI / 2;
-    ground.position.y = -0.04;
+    ground.position.set(arrayCenterX, -0.035, 0.8);
     ground.receiveShadow = true;
     scene.add(ground);
 
-    const grid = new THREE.GridHelper(sceneExtent, Math.max(42, Math.round(sceneExtent / 2)), 0x4b6a70, 0x243b40);
-    grid.position.y = 0.015;
-    const gridMaterials = Array.isArray(grid.material) ? grid.material : [grid.material];
-    gridMaterials.forEach((material) => {
-      material.transparent = true;
-      material.opacity = 0.24;
-    });
-    scene.add(grid);
+    const ocean = new THREE.Mesh(
+      new THREE.PlaneGeometry(260, 92),
+      new THREE.MeshStandardMaterial({ color: 0x416b75, roughness: 0.48, metalness: 0.08, transparent: true, opacity: 0.92 }),
+    );
+    ocean.rotation.x = -Math.PI / 2;
+    ocean.position.set(arrayCenterX, -0.45, 96);
+    scene.add(ocean);
+
+    const hillMaterial = new THREE.MeshStandardMaterial({ color: 0x65704b, roughness: 1 });
+    for (let index = 0; index < 9; index += 1) {
+      const radius = 17 + hash(index + 610) * 18;
+      const hill = new THREE.Mesh(new THREE.ConeGeometry(radius, 7 + hash(index + 650) * 8, 7), hillMaterial);
+      hill.position.set(arrayCenterX - 95 + index * 24, 2.8, -90 - hash(index + 690) * 18);
+      hill.scale.z = 0.72;
+      scene.add(hill);
+    }
+
+    const trunkMaterial = new THREE.MeshStandardMaterial({ color: 0x59442d, roughness: 1 });
+    const canopyMaterial = new THREE.MeshStandardMaterial({ color: 0x405737, roughness: 1 });
+    for (let index = 0; index < 24; index += 1) {
+      const side = index % 2 === 0 ? -1 : 1;
+      const tree = new THREE.Group();
+      const trunkHeight = 1.8 + hash(index + 730) * 2.6;
+      const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.16, trunkHeight, 7), trunkMaterial);
+      trunk.position.y = trunkHeight / 2;
+      const canopy = new THREE.Mesh(new THREE.DodecahedronGeometry(1.1 + hash(index + 770) * 1.4, 0), canopyMaterial);
+      canopy.scale.set(1.5, 0.62, 1.05);
+      canopy.position.y = trunkHeight + 0.25;
+      tree.add(trunk, canopy);
+      tree.position.set(
+        arrayCenterX + side * (32 + hash(index + 810) * 63),
+        -0.02,
+        -62 + hash(index + 850) * 96,
+      );
+      scene.add(tree);
+    }
+
+    const frontRowHorizontalDepth = Math.cos(tilt) * (
+      geometry.rows[0].panelsDeep * panelSlopeM + (geometry.rows[0].panelsDeep - 1) * panelGapM
+    );
+    const wallZ = getRowCenterZ(1, geometry) + frontRowHorizontalDepth / 2 + 3.2;
+    const wallWidth = arrayBounds.width + 9;
+    const rockMaterial = new THREE.MeshStandardMaterial({ color: 0x343632, roughness: 1 });
+    const rockGeometry = new THREE.DodecahedronGeometry(0.42, 0);
+    const rockCount = Math.ceil(wallWidth / 0.52) * 3;
+    const wall = new THREE.InstancedMesh(rockGeometry, rockMaterial, rockCount);
+    const stone = new THREE.Object3D();
+    const stonesPerLayer = Math.ceil(wallWidth / 0.52);
+    for (let index = 0; index < rockCount; index += 1) {
+      const layer = Math.floor(index / stonesPerLayer);
+      const column = index % stonesPerLayer;
+      stone.position.set(
+        arrayCenterX - wallWidth / 2 + column * (wallWidth / Math.max(1, stonesPerLayer - 1)) + (hash(index + 900) - 0.5) * 0.24,
+        0.18 + layer * 0.29 + hash(index + 930) * 0.08,
+        wallZ + (hash(index + 960) - 0.5) * 0.5,
+      );
+      stone.rotation.set(hash(index + 990) * 0.5, hash(index + 1020) * Math.PI, hash(index + 1050) * 0.4);
+      stone.scale.set(0.75 + hash(index + 1080) * 0.5, 0.62 + hash(index + 1110) * 0.38, 0.78 + hash(index + 1140) * 0.45);
+      stone.updateMatrix();
+      wall.setMatrixAt(index, stone.matrix);
+    }
+    wall.castShadow = true;
+    wall.receiveShadow = true;
+    scene.add(wall);
+
+    const fenceMaterial = new THREE.MeshStandardMaterial({ color: 0x6b7370, metalness: 0.76, roughness: 0.38 });
+    const fenceZ = wallZ + 1.15;
+    for (let index = 0; index <= 18; index += 1) {
+      const x = arrayCenterX - wallWidth / 2 + index * (wallWidth / 18);
+      scene.add(makeBeam(new THREE.Vector3(x, 0, fenceZ), new THREE.Vector3(x, 1.35, fenceZ), 0.025, fenceMaterial));
+    }
+    for (const y of [0.36, 0.78, 1.18]) {
+      scene.add(makeBeam(new THREE.Vector3(arrayCenterX - wallWidth / 2, y, fenceZ), new THREE.Vector3(arrayCenterX + wallWidth / 2, y, fenceZ), 0.009, fenceMaterial));
+    }
 
     const arrayGroup = new THREE.Group();
     scene.add(arrayGroup);
     const panelVisuals: PanelVisual[] = [];
+    const rackVisuals: RackVisual[] = [];
     const clickablePanels: THREE.Object3D[] = [];
     const panelTexture = makePanelTexture(renderer);
     const frameMaterial = new THREE.MeshStandardMaterial({ color: 0x9aa9a8, metalness: 0.82, roughness: 0.26 });
     const rackMaterial = new THREE.MeshStandardMaterial({ color: 0x758482, metalness: 0.88, roughness: 0.3 });
-    const tilt = THREE.MathUtils.degToRad(geometry.tiltDeg);
     const lowEdgeHeight = geometry.lowEdgeClearanceM;
     const modulePitch = geometryMetrics.modulePitchM;
     const fullRowWidth = Math.max(...geometry.rows.map((_, index) => getRowWidth(index + 1, geometry)));
@@ -343,8 +501,60 @@ export function WindScene({
           glass.receiveShadow = true;
           glass.userData = { row: rowNumber, module: moduleNumber };
           assembly.add(glass);
+          const immediateDamaged = rowNumber <= 2
+            || (rowNumber === 3 && (moduleNumber % 7 === 0 || moduleNumber % 13 === 0))
+            || (rowNumber === 4 && moduleNumber % 23 === 0);
+          const damageSeed = hash(rowNumber * 1000 + moduleNumber);
+          const immediatePosition = assembly.position.clone();
+          const immediateRotation = new THREE.Euler(tilt, 0, 0);
+          if (immediateDamaged) {
+            if (rowNumber <= 2) {
+              const upright = moduleNumber % 11 === 0 || moduleNumber % 17 === 0;
+              const folded = !upright && moduleNumber % 7 === 0;
+              immediatePosition.x += (hash(moduleNumber + rowNumber * 47) - 0.5) * 3.1;
+              immediatePosition.z = getRowCenterZ(1, geometry) + frontRowHorizontalDepth * 0.15 + damageSeed * 7.2;
+              if (moduleNumber % 19 === 0) immediatePosition.z = fenceZ + 1.4 + hash(moduleNumber + 221) * 2.2;
+              immediatePosition.y = upright ? panelSlopeM * 0.47 : folded ? 0.42 : 0.09 + hash(moduleNumber + 271) * 0.06;
+              immediateRotation.set(
+                upright ? THREE.MathUtils.degToRad(76 + hash(moduleNumber + 301) * 13) : folded ? THREE.MathUtils.degToRad(28 + hash(moduleNumber + 331) * 24) : THREE.MathUtils.degToRad(hash(moduleNumber + 361) * 5),
+                (hash(moduleNumber + 391) - 0.5) * 0.65,
+                (hash(moduleNumber + 421) - 0.5) * (upright ? 0.48 : 0.2),
+              );
+            } else {
+              immediatePosition.x += (hash(moduleNumber + rowNumber * 53) - 0.5) * 2.4;
+              immediatePosition.z += 2.2 + hash(moduleNumber + 451) * 3.4;
+              immediatePosition.y = 0.1 + hash(moduleNumber + 481) * 0.12;
+              immediateRotation.set(
+                THREE.MathUtils.degToRad(hash(moduleNumber + 511) * 12),
+                (hash(moduleNumber + 541) - 0.5) * 0.55,
+                (hash(moduleNumber + 571) - 0.5) * 0.18,
+              );
+            }
+          }
+          let crack: THREE.Mesh | undefined;
+          if (immediateDamaged && moduleNumber % 9 === 0) {
+            crack = new THREE.Mesh(
+              new THREE.BoxGeometry(0.018, 0.012, panelSlopeM * 0.72),
+              new THREE.MeshBasicMaterial({ color: 0xcbd6d6 }),
+            );
+            crack.position.y = 0.062;
+            crack.rotation.y = 0.38;
+            crack.visible = false;
+            assembly.add(crack);
+          }
           arrayGroup.add(assembly);
-          panelVisuals.push({ assembly, glass, row: rowNumber, module: moduleNumber, baseRotationX: tilt });
+          panelVisuals.push({
+            assembly,
+            glass,
+            row: rowNumber,
+            module: moduleNumber,
+            baseRotationX: tilt,
+            basePosition: assembly.position.clone(),
+            immediatePosition,
+            immediateRotation,
+            immediateDamaged,
+            crack,
+          });
           clickablePanels.push(glass);
         }
       }
@@ -355,6 +565,7 @@ export function WindScene({
         rail.position.set(rowOffsetX, railHeight, z + railZ);
         rail.castShadow = true;
         arrayGroup.add(rail);
+        rackVisuals.push({ object: rail, row: rowNumber, basePosition: rail.position.clone(), baseQuaternion: rail.quaternion.clone() });
       }
 
       const supportCount = Math.max(2, Math.round(geometry.rackSupportsFullRow * rowWidth / fullRowWidth));
@@ -364,6 +575,10 @@ export function WindScene({
         const post = makeBeam(new THREE.Vector3(x, 0.08, z - 0.15), postTop, 0.045, rackMaterial);
         const brace = makeBeam(new THREE.Vector3(x, 0.08, z + 1.42), postTop, 0.038, rackMaterial);
         arrayGroup.add(post, brace);
+        rackVisuals.push(
+          { object: post, row: rowNumber, basePosition: post.position.clone(), baseQuaternion: post.quaternion.clone() },
+          { object: brace, row: rowNumber, basePosition: brace.position.clone(), baseQuaternion: brace.quaternion.clone() },
+        );
       }
 
       const rowPosition = rowNumber === 1 ? " · FRONT" : rowNumber === rowCount ? " · REAR" : "";
@@ -718,7 +933,7 @@ export function WindScene({
       let turbulence = (live.config.ambientTurbulence / 100) * 0.55;
 
       for (const row of rowFlowGeometry) {
-        if (live.showDamage && row.row <= 2) continue;
+        if (live.arrayState !== "restored" && row.row <= 2) continue;
         if (Math.abs(x - row.offsetX) > row.width / 2 + 1.25) continue;
 
         const dz = z - row.z;
@@ -818,7 +1033,7 @@ export function WindScene({
         live.config.ambientTurbulence,
         live.config.panelFrequencyHz,
         live.config.dampingPercent,
-        live.showDamage,
+        live.arrayState,
         live.config.mitigation,
         live.config.screenPorosity,
         live.config.screenHeightM,
@@ -854,8 +1069,30 @@ export function WindScene({
           panel.glass.material.color.copy(color);
           panel.glass.material.emissive.copy(selected ? new THREE.Color(0xffd84f) : color.clone().multiplyScalar(0.19));
           panel.glass.material.emissiveIntensity = selected ? 2.1 : live.viewMode === "flow" ? 0.32 : 0.66;
-          panel.assembly.visible = !(live.showDamage && panel.row <= 2);
+          panel.assembly.visible = !(live.arrayState === "repaired" && panel.row <= 2);
+          if (live.arrayState === "immediate" && panel.immediateDamaged) {
+            panel.assembly.position.copy(panel.immediatePosition);
+            panel.assembly.rotation.copy(panel.immediateRotation);
+            panel.glass.material.color.lerp(new THREE.Color(0x68787b), 0.56);
+            panel.glass.material.emissiveIntensity = selected ? 1.4 : 0.08;
+          } else {
+            panel.assembly.position.copy(panel.basePosition);
+            panel.assembly.rotation.set(panel.baseRotationX, 0, 0);
+          }
+          if (panel.crack) panel.crack.visible = live.arrayState === "immediate" && panel.immediateDamaged;
           if (selected && panel.assembly.visible) activePanel = panel;
+        }
+        const rackDamageRotation = new THREE.Quaternion();
+        for (const rack of rackVisuals) {
+          rack.object.position.copy(rack.basePosition);
+          rack.object.quaternion.copy(rack.baseQuaternion);
+          if (live.arrayState === "immediate" && rack.row <= 2) {
+            const direction = rack.row === 1 ? 1 : -1;
+            rack.object.position.y -= rack.row === 1 ? 0.33 : 0.2;
+            rack.object.position.z += rack.row === 1 ? 0.7 : 0.32;
+            rackDamageRotation.setFromAxisAngle(new THREE.Vector3(0, 0, 1), direction * THREE.MathUtils.degToRad(rack.row === 1 ? 7 : 4));
+            rack.object.quaternion.multiply(rackDamageRotation);
+          }
         }
         if (activePanel) {
           activePanel.assembly.add(selectionMarker);
@@ -966,7 +1203,7 @@ export function WindScene({
             oldY + (particleFlowSample.vy + particleTurbulence[turbulenceOffset + 1]) * delta;
 
           for (const row of rowFlowGeometry) {
-            if (live.showDamage && row.row <= 2) continue;
+            if (live.arrayState !== "restored" && row.row <= 2) continue;
             if (Math.abs(newX - row.offsetX) > row.width / 2) continue;
             const newDz = newZ - row.z;
             if (Math.abs(newDz) > row.horizontalDepth / 2) continue;
@@ -1046,6 +1283,7 @@ export function WindScene({
       selectionMarker.scale.setScalar(selectionPulse);
       selectionMaterial.opacity = 0.86 + Math.sin(elapsed * 3.2) * 0.1;
       for (const panel of panelVisuals) {
+        if (live.arrayState === "immediate" && panel.immediateDamaged) continue;
         const panelResult = getPanelResult(live.result, panel.row, panel.module);
         const amplitude = vibrationScale * panelResult.vibrationIndex * 0.00011;
         const phase = panel.module * 0.31 + panel.row * 0.72;
@@ -1079,6 +1317,8 @@ export function WindScene({
       });
       panelTexture?.dispose();
       groundTexture?.dispose();
+      fieldTexture?.dispose();
+      skyTexture?.dispose();
       renderer.dispose();
       renderer.domElement.remove();
     };

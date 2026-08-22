@@ -4,6 +4,8 @@ import test from "node:test";
 import {
   SCENARIOS,
   getArrayBounds,
+  getRowOffsetX,
+  getRowWidth,
   getScreenGeometry,
   simulate,
 } from "../app/lib/physics.ts";
@@ -12,8 +14,8 @@ import { DEFAULT_ARRAY_CONFIG, cloneArrayConfig, getArrayMetrics } from "../app/
 const baseConfig = {
   geometry: cloneArrayConfig(DEFAULT_ARRAY_CONFIG),
   ...SCENARIOS.storm,
-  panelFrequencyHz: 2.4,
-  dampingPercent: 2.5,
+  panelFrequencyHz: DEFAULT_ARRAY_CONFIG.naturalFrequencyHz,
+  dampingPercent: DEFAULT_ARRAY_CONFIG.structuralDampingPercent,
   mitigation: "none",
   screenPorosity: 40,
   screenHeightM: 2.2,
@@ -32,6 +34,12 @@ const baseConfig = {
   damperStartRow: 1,
   damperEndRow: 1,
 };
+
+test("right-aligns both half rows with their adjacent full rows", () => {
+  const rightEdge = (row) => getRowOffsetX(row, DEFAULT_ARRAY_CONFIG) + getRowWidth(row, DEFAULT_ARRAY_CONFIG) / 2;
+  assert.ok(Math.abs(rightEdge(1) - rightEdge(2)) < 0.001);
+  assert.ok(Math.abs(rightEdge(7) - rightEdge(6)) < 0.001);
+});
 
 test("resolves every physical panel and column", () => {
   const result = simulate(baseConfig);

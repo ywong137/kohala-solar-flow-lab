@@ -12,6 +12,7 @@ import {
   saveArrayConfig,
   type ArrayGeometryConfig,
 } from "../lib/array-config";
+import { getRowCenterZ, getRowWidth } from "../lib/physics";
 
 export function ArrayConfiguration() {
   const [config, setConfig] = useState<ArrayGeometryConfig>(cloneArrayConfig());
@@ -19,6 +20,24 @@ export function ArrayConfiguration() {
   const [savedMessage, setSavedMessage] = useState("Calibrated defaults loaded");
   const metrics = useMemo(() => getArrayMetrics(config), [config]);
   const maxColumns = Math.max(...config.rows.map((row) => row.columns));
+  const plan = useMemo(() => {
+    const rows = config.rows.map((row, index) => {
+      const width = getRowWidth(index + 1, config);
+      return {
+        ...row,
+        index,
+        width,
+        centerX: row.offsetXM,
+        centerZ: getRowCenterZ(index + 1, config),
+        chord: row.panelsDeep * config.panelLengthM + (row.panelsDeep - 1) * config.panelGapM,
+      };
+    });
+    const minX = Math.min(...rows.map((row) => row.centerX - row.width / 2));
+    const maxX = Math.max(...rows.map((row) => row.centerX + row.width / 2));
+    const minZ = Math.min(...rows.map((row) => row.centerZ - row.chord / 2));
+    const maxZ = Math.max(...rows.map((row) => row.centerZ + row.chord / 2));
+    return { rows, minX, minZ, width: maxX - minX, depth: maxZ - minZ };
+  }, [config]);
   const hasChanges = JSON.stringify(config) !== JSON.stringify(savedConfig);
 
   useEffect(() => {
@@ -120,21 +139,30 @@ export function ArrayConfiguration() {
             </div>
           </div>
 
-          <div className="layout-plan" aria-label={`Plan view with ${config.rows.length} rows and ${metrics.totalPanelCount} panels`}>
-            {config.rows.slice().reverse().map((row, reverseIndex) => {
-              const index = config.rows.length - reverseIndex - 1;
-              const defaultRow = DEFAULT_ARRAY_CONFIG.rows[index];
-              return (
-                <div className="layout-plan-row" key={index}>
-                  <span>R{index + 1}</span>
-                  <div className="layout-plan-track">
-                    <i style={{ width: `${Math.max(4, row.columns / maxColumns * 80)}%`, left: `calc(50% + ${row.offsetXM * 5}px)` }} />
-                  </div>
-                  <strong>{row.columns} × {row.panelsDeep} = {row.columns * row.panelsDeep}</strong>
-                  {defaultRow ? <button type="button" onClick={() => setConfig((current) => ({ ...current, rows: current.rows.map((item, rowIndex) => rowIndex === index ? { ...defaultRow } : item) }))}>Default row</button> : null}
+          <div className="layout-plan" aria-label={`Satellite-style plan view with ${config.rows.length} rows and ${metrics.totalPanelCount} panels`}>
+            <span className="layout-plan-north">N ↑</span>
+            <span className="layout-plan-mauka">MAUKA · REAR</span>
+            <span className="layout-plan-makai">MAKAI · FRONT</span>
+            <div className="layout-plan-array">
+              {plan.rows.map((row) => (
+                <div
+                  className="layout-plan-row"
+                  key={row.index}
+                  style={{
+                    left: `${((row.centerX - row.width / 2 - plan.minX) / plan.width) * 100}%`,
+                    top: `${((row.centerZ - row.chord / 2 - plan.minZ) / plan.depth) * 100}%`,
+                    width: `${(row.width / plan.width) * 100}%`,
+                    height: `${Math.max(2.8, (row.chord / plan.depth) * 100)}%`,
+                    "--panel-columns": row.columns,
+                    "--panel-depth": row.panelsDeep,
+                  } as React.CSSProperties}
+                >
+                  <span>R{row.index + 1}</span>
+                  <strong>{row.columns * row.panelsDeep}</strong>
                 </div>
-              );
-            })}
+              ))}
+            </div>
+            <div className="layout-plan-scale"><i /><span>10 m</span></div>
           </div>
 
           <div className="row-editor-grid">
@@ -165,14 +193,19 @@ export function ArrayConfiguration() {
         </section>
 
         <section className="config-card">
-          <div className="config-section-head"><div><span className="eyebrow">ORIENTATION AND DYNAMICS</span><h2>Bearings and saved model defaults</h2><p>The dynamics values are uncalibrated placeholders, not measurements from this rack.</p></div></div>
+          <div className="config-section-head"><div><span className="eyebrow">ORIENTATION AND DYNAMICS</span><h2>Bearings and saved model defaults</h2><p>The dynamics defaults come from published field tests. They are not measurements from this rack.</p></div></div>
           <div className="config-control-grid">
             <ConfigSlider label="Array row-axis bearing" value={config.arrayAxisBearing} min={0} max={359} step={1} unit="°" defaultValue={DEFAULT_ARRAY_CONFIG.arrayAxisBearing} onChange={(value) => updateGlobal("arrayAxisBearing", value)} />
             <ConfigSlider label="Mauka wind bearing" value={config.maukaBearing} min={0} max={359} step={1} unit="°" defaultValue={DEFAULT_ARRAY_CONFIG.maukaBearing} onChange={(value) => updateGlobal("maukaBearing", value)} />
-            <ConfigSlider label="Natural frequency placeholder" value={config.naturalFrequencyHz} min={0.3} max={15} step={0.1} unit="Hz" defaultValue={DEFAULT_ARRAY_CONFIG.naturalFrequencyHz} onChange={(value) => updateGlobal("naturalFrequencyHz", value)} />
-            <ConfigSlider label="Structural damping placeholder" value={config.structuralDampingPercent} min={0.1} max={20} step={0.1} unit="%" defaultValue={DEFAULT_ARRAY_CONFIG.structuralDampingPercent} onChange={(value) => updateGlobal("structuralDampingPercent", value)} />
+            <ConfigSlider label="Natural frequency" value={config.naturalFrequencyHz} min={0.3} max={15} step={0.1} unit="Hz" defaultValue={DEFAULT_ARRAY_CONFIG.naturalFrequencyHz} onChange={(value) => updateGlobal("naturalFrequencyHz", value)} />
+            <ConfigSlider label="Structural damping" value={config.structuralDampingPercent} min={0.1} max={20} step={0.1} unit="%" defaultValue={DEFAULT_ARRAY_CONFIG.structuralDampingPercent} onChange={(value) => updateGlobal("structuralDampingPercent", value)} />
           </div>
-          <div className="config-caution"><strong>Calibration priority:</strong> Measure rack modes with impact or shaker testing. Frequency depends on rails, posts, connections, foundations, and soil. Damping is usually more uncertain and can change with motion amplitude and joint slip.</div>
+          <div className="config-caution">
+            <strong>Research basis:</strong> A field-tested tracking PV support had three torsional modes from 2.9–5.0 Hz and damping from 1.07–2.99%.
+            The defaults use the lower bounds, 2.9 Hz and 1.1%, as a conservative screening case. A flexible cable PV support measured 1.49–3.53 Hz and 0.4–1.7% damping.
+            This fixed rack has different rails, posts, joints, foundations, and soil. Use an impact or shaker test before design.
+            <span className="research-links"><a href="https://research-repository.rmit.edu.au/articles/journal_contribution/Modal_analysis_of_tracking_photovoltaic_support_system/27578556" target="_blank" rel="noreferrer">RMIT field modal study</a><a href="https://www.mdpi.com/2076-3417/15/11/5919" target="_blank" rel="noreferrer">Flexible PV field study</a></span>
+          </div>
         </section>
 
         <p className="storage-note">This configuration is saved in this browser. It does not change the default for other people who open the public link.</p>
