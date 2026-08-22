@@ -26,6 +26,19 @@ export const HIGH_EDGE_CLEARANCE_M =
 export const RACK_SUPPORTS_PER_ROW = 7;
 export const ARRAY_AXIS_BEARING = 130;
 export const MAUKA_BEARING = 40;
+export const MODULE_PITCH_M = PANEL_SPAN_M + PANEL_GAP_M;
+export const SCREEN_ROW_OFFSET_M = ROW_SPACING_M / 2;
+
+export const getRowCenterZ = (row: number) =>
+  ((ROW_COUNT - 1) / 2 - (row - 1)) * ROW_SPACING_M;
+
+export const getRowOffsetX = (row: number) => {
+  const index = row - 1;
+  return ROW_COLUMN_OFFSETS[index] * MODULE_PITCH_M + ROW_STAGGER_OFFSETS_M[index];
+};
+
+export const getRowWidth = (row: number) =>
+  ROW_COLUMN_COUNTS[row - 1] * MODULE_PITCH_M - PANEL_GAP_M;
 
 export type ViewMode = "flow" | "pressure" | "vibration";
 export type MitigationId = "none" | "screen" | "vanes" | "spoilers" | "dampers";
@@ -40,7 +53,8 @@ export type SimulationConfig = {
   mitigation: MitigationId;
   screenPorosity: number;
   screenHeightM: number;
-  screenProtectedRows: number;
+  screenStartRow: number;
+  screenEndRow: number;
   vaneLengthM: number;
   vaneRowCount: number;
   spoilerStyle: SpoilerStyle;
@@ -61,6 +75,23 @@ export type RowResult = {
   peakUpliftKpa: number;
   vibrationIndex: number;
   dynamicFactor: number;
+  peakColumn: number;
+  panels: PanelResult[];
+};
+
+export type PanelResult = {
+  row: number;
+  module: number;
+  column: number;
+  depth: number;
+  xM: number;
+  zM: number;
+  contributingWakeRows: number;
+  turbulencePercent: number;
+  meanUpliftKpa: number;
+  peakUpliftKpa: number;
+  vibrationIndex: number;
+  dynamicFactor: number;
 };
 
 export type SimulationResult = {
@@ -68,6 +99,8 @@ export type SimulationResult = {
   sheddingFrequencyHz: number;
   peakUpliftKpa: number;
   peakRow: number;
+  peakColumn: number;
+  peakModule: number;
   vibrationIndex: number;
   frontRearRatio: number;
   alignmentPercent: number;
@@ -87,8 +120,8 @@ export const MITIGATIONS: Record<
   },
   screen: {
     label: "Porous wind screen",
-    short: "Mauka perimeter",
-    detail: "A porous mauka screen reduces the incoming gust. Adjust its open area and height.",
+    short: "Behind Row 7",
+    detail: "Place porous screens behind one row or an inclusive range. The local shelter follows wind direction and distance.",
     color: "#7df0c5",
     colorName: "green",
   },
@@ -150,64 +183,102 @@ export type ScenarioId = keyof typeof SCENARIOS;
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
-export function getMitigationEffects(config: SimulationConfig) {
-  if (config.mitigation === "screen") {
-    const porosity = clamp(config.screenPorosity, 20, 80);
-    const solidity = 1 - porosity / 100;
-    const heightFactor = clamp(config.screenHeightM / 2.2, 0.35, 1.45);
-    const coverageFactor = 0.55 + 0.45 * clamp(config.screenProtectedRows / ROW_COUNT, 1 / ROW_COUNT, 1);
-    const pressureFactor = clamp(1 - 0.17 * solidity * heightFactor * coverageFactor, 0.78, 0.98);
-    const offDesignPenalty = Math.abs(porosity - 40) * 0.003;
-    const turbulenceFactor = clamp(1 - (0.1 + 0.04 * heightFactor - offDesignPenalty) * coverageFactor, 0.78, 1.05);
-    return { turbulenceFactor, pressureFactor, dampingBoost: 0 };
-  }
-
-  if (config.mitigation === "vanes") {
-    const lengthRatio = clamp(config.vaneLengthM / TABLE_CHORD_M, 0.1, 1.5);
-    const rackCoverage = Math.min(lengthRatio, 1);
-    const extension = Math.max(lengthRatio - 1, 0);
-    const rowCoverage = clamp(0.5 + 0.5 * (config.vaneRowCount / 3), 0.55, 1.35);
-    return {
-      turbulenceFactor: clamp(1 - (0.28 * rackCoverage + 0.05 * extension) * rowCoverage, 0.62, 0.97),
-      pressureFactor: clamp(1 - (0.09 * rackCoverage + 0.03 * extension) * rowCoverage, 0.84, 0.99),
-      dampingBoost: 0,
-    };
-  }
-
-  if (config.mitigation === "spoilers") {
-    const styleTarget = {
-      perforated: { turbulence: 0.82, pressure: 0.78 },
-      continuous: { turbulence: 0.78, pressure: 0.72 },
-      tabs: { turbulence: 0.87, pressure: 0.84 },
-    }[config.spoilerStyle];
-    const heightFactor = clamp(config.spoilerHeightM / 0.3, 0.35, 1.7);
-    const angleFactor = clamp(Math.cos(THREE_DEGREES_TO_RADIANS * (config.spoilerAngleDeg - 20)), 0.35, 1);
-    const rowCoverage = clamp(0.62 + 0.38 * (config.spoilerRowCount / 2), 0.62, 1.55);
-    const effectiveness = clamp(heightFactor * angleFactor * rowCoverage, 0.25, 1.45);
-    return {
-      turbulenceFactor: clamp(1 - (1 - styleTarget.turbulence) * effectiveness, 0.65, 0.97),
-      pressureFactor: clamp(1 - (1 - styleTarget.pressure) * effectiveness, 0.62, 0.97),
-      dampingBoost: 0,
-    };
-  }
-
-  if (config.mitigation === "dampers") {
-    const spacingFactor = clamp(2 / config.damperSpacingM, 0.5, 2.5);
-    const rowCoverage = clamp(0.72 + 0.28 * (config.damperRowCount / 2), 0.72, 1.7);
-    return {
-      turbulenceFactor: 1,
-      pressureFactor: 1,
-      dampingBoost: clamp(config.damperDampingPercent * spacingFactor * rowCoverage, 0.5, 18),
-    };
-  }
-
-  return { turbulenceFactor: 1, pressureFactor: 1, dampingBoost: 0 };
-}
-
 const THREE_DEGREES_TO_RADIANS = Math.PI / 180;
 
 export function circularDifference(a: number, b: number) {
   return ((a - b + 540) % 360) - 180;
+}
+
+export type FlowComponents = {
+  x: number;
+  z: number;
+  crossRowAlignment: number;
+};
+
+export function getFlowComponents(windBearing: number): FlowComponents {
+  const flowBearing = (windBearing + 180) % 360;
+  const rawX = Math.cos(THREE_DEGREES_TO_RADIANS * circularDifference(flowBearing, ARRAY_AXIS_BEARING));
+  const rawZ = Math.cos(
+    THREE_DEGREES_TO_RADIANS * circularDifference(flowBearing, MAUKA_BEARING + 180),
+  );
+  const length = Math.hypot(rawX, rawZ) || 1;
+  const x = rawX / length;
+  const z = rawZ / length;
+  return { x, z, crossRowAlignment: Math.abs(z) };
+}
+
+export function getInstalledScreenRows(config: SimulationConfig) {
+  const start = Math.round(clamp(Math.min(config.screenStartRow, config.screenEndRow), 1, ROW_COUNT));
+  const end = Math.round(clamp(Math.max(config.screenStartRow, config.screenEndRow), 1, ROW_COUNT));
+  return Array.from({ length: end - start + 1 }, (_, index) => start + index);
+}
+
+export function getScreenGeometry(row: number) {
+  return {
+    row,
+    x: getRowOffsetX(row),
+    z: getRowCenterZ(row) - SCREEN_ROW_OFFSET_M,
+    width: getRowWidth(row) + 1.4,
+  };
+}
+
+export type ScreenFlowEffects = {
+  pressureFactor: number;
+  speedFactor: number;
+  turbulenceFactor: number;
+  screenCount: number;
+};
+
+export function getScreenFlowEffects(
+  config: SimulationConfig,
+  xM: number,
+  zM: number,
+  flow = getFlowComponents(config.windBearing),
+): ScreenFlowEffects {
+  if (config.mitigation !== "screen" || Math.abs(flow.z) < 0.08) {
+    return { pressureFactor: 1, speedFactor: 1, turbulenceFactor: 1, screenCount: 0 };
+  }
+
+  const porosity = clamp(config.screenPorosity, 20, 80);
+  const solidity = 1 - porosity / 100;
+  const height = clamp(config.screenHeightM, 0.8, 3.2);
+  const heightFactor = clamp(height / 2.2, 0.35, 1.45);
+  const porosityEfficiency = clamp(1 - Math.abs(porosity - 40) / 55, 0.35, 1);
+  let remainingGustEnergy = 1;
+  let remainingTurbulence = 1;
+  let screenCount = 0;
+
+  for (const row of getInstalledScreenRows(config)) {
+    const screen = getScreenGeometry(row);
+    const downstreamDistance = (zM - screen.z) / flow.z;
+    if (downstreamDistance <= 0) continue;
+
+    const xAtScreen = xM - flow.x * downstreamDistance;
+    const outsideEdge = Math.max(0, Math.abs(xAtScreen - screen.x) - screen.width / 2);
+    const lateralFactor = Math.exp(-Math.pow(outsideEdge / Math.max(1, height * 1.35), 2));
+    if (lateralFactor < 0.02) continue;
+
+    const distanceFactor = Math.exp(-downstreamDistance / Math.max(4, height * 10));
+    const normalFactor = Math.pow(Math.abs(flow.z), 0.72);
+    const shield = clamp(
+      solidity * heightFactor * porosityEfficiency * distanceFactor * lateralFactor * normalFactor,
+      0,
+      0.78,
+    );
+    if (shield < 0.01) continue;
+
+    remainingGustEnergy *= 1 - 0.38 * shield;
+    remainingTurbulence *= 1 - 0.3 * shield;
+    screenCount += 1;
+  }
+
+  const pressureFactor = clamp(remainingGustEnergy, 0.58, 1);
+  return {
+    pressureFactor,
+    speedFactor: Math.sqrt(pressureFactor),
+    turbulenceFactor: clamp(remainingTurbulence, 0.62, 1),
+    screenCount,
+  };
 }
 
 export function cardinalDirection(bearing: number) {
@@ -215,76 +286,243 @@ export function cardinalDirection(bearing: number) {
   return points[Math.round(((bearing % 360) + 360) % 360 / 45) % 8];
 }
 
+type LocalMitigationEffects = {
+  turbulenceFactor: number;
+  pressureFactor: number;
+  dampingBoost: number;
+  wakeSourceFactor: number;
+};
+
+function getLocalMitigationEffects(config: SimulationConfig, row: number): LocalMitigationEffects {
+  if (config.mitigation === "vanes" && row <= config.vaneRowCount) {
+    const lengthRatio = clamp(config.vaneLengthM / TABLE_CHORD_M, 0.1, 1.5);
+    const rackCoverage = Math.min(lengthRatio, 1);
+    const extension = Math.max(lengthRatio - 1, 0);
+    const turbulenceFactor = clamp(1 - 0.28 * rackCoverage - 0.05 * extension, 0.62, 0.97);
+    const pressureFactor = clamp(1 - 0.09 * rackCoverage - 0.03 * extension, 0.84, 0.99);
+    return {
+      turbulenceFactor,
+      pressureFactor,
+      dampingBoost: 0,
+      wakeSourceFactor: clamp(0.18 + 0.82 * turbulenceFactor, 0.68, 0.98),
+    };
+  }
+
+  if (config.mitigation === "spoilers" && row <= config.spoilerRowCount) {
+    const styleTarget = {
+      perforated: { turbulence: 0.82, pressure: 0.78 },
+      continuous: { turbulence: 0.78, pressure: 0.72 },
+      tabs: { turbulence: 0.87, pressure: 0.84 },
+    }[config.spoilerStyle];
+    const heightFactor = clamp(config.spoilerHeightM / 0.3, 0.35, 1.7);
+    const angleFactor = clamp(
+      Math.cos(THREE_DEGREES_TO_RADIANS * (config.spoilerAngleDeg - 20)),
+      0.35,
+      1,
+    );
+    const effectiveness = clamp(heightFactor * angleFactor, 0.25, 1.45);
+    const turbulenceFactor = clamp(
+      1 - (1 - styleTarget.turbulence) * effectiveness,
+      0.65,
+      0.97,
+    );
+    const pressureFactor = clamp(
+      1 - (1 - styleTarget.pressure) * effectiveness,
+      0.62,
+      0.97,
+    );
+    return {
+      turbulenceFactor,
+      pressureFactor,
+      dampingBoost: 0,
+      wakeSourceFactor: clamp(0.12 + 0.88 * turbulenceFactor, 0.66, 0.98),
+    };
+  }
+
+  if (config.mitigation === "dampers" && row <= config.damperRowCount) {
+    const spacingFactor = clamp(2 / config.damperSpacingM, 0.5, 2.5);
+    return {
+      turbulenceFactor: 1,
+      pressureFactor: 1,
+      dampingBoost: clamp(config.damperDampingPercent * spacingFactor, 0.5, 18),
+      wakeSourceFactor: 1,
+    };
+  }
+
+  return { turbulenceFactor: 1, pressureFactor: 1, dampingBoost: 0, wakeSourceFactor: 1 };
+}
+
+export function getPanelCoordinates(row: number, module: number) {
+  const rowIndex = Math.round(clamp(row, 1, ROW_COUNT)) - 1;
+  const columnCount = ROW_COLUMN_COUNTS[rowIndex];
+  const safeModule = Math.round(clamp(module, 1, columnCount * PANELS_DEEP_PER_ROW));
+  const depthIndex = Math.floor((safeModule - 1) / columnCount);
+  const columnIndex = (safeModule - 1) % columnCount;
+  const slopeOffset =
+    (depthIndex - (PANELS_DEEP_PER_ROW - 1) / 2) * (PANEL_SLOPE_M + PANEL_GAP_M);
+  return {
+    row: rowIndex + 1,
+    module: safeModule,
+    column: columnIndex + 1,
+    depth: depthIndex + 1,
+    xM: getRowOffsetX(rowIndex + 1) + (columnIndex - (columnCount - 1) / 2) * MODULE_PITCH_M,
+    zM: getRowCenterZ(rowIndex + 1) + Math.cos(THREE_DEGREES_TO_RADIANS * PANEL_TILT_DEG) * slopeOffset,
+  };
+}
+
+export function getPanelResult(result: SimulationResult, row: number, module: number) {
+  const rowResult = result.rows[Math.round(clamp(row, 1, ROW_COUNT)) - 1];
+  const columnCount = ROW_COLUMN_COUNTS[rowResult.row - 1];
+  const safeModule = Math.round(clamp(module, 1, columnCount * PANELS_DEEP_PER_ROW));
+  return rowResult.panels[safeModule - 1];
+}
+
 export function simulate(config: SimulationConfig): SimulationResult {
   const speedMs = config.windSpeedMph * 0.44704;
   const airDensity = 1.17;
   const dynamicPressureKpa = (0.5 * airDensity * speedMs * speedMs) / 1000;
-  const maukaAlignment = Math.cos((circularDifference(config.windBearing, MAUKA_BEARING) * Math.PI) / 180);
-  const crossRowAlignment = Math.abs(maukaAlignment);
-  const alignmentPercent = crossRowAlignment * 100;
-  const flowFromMauka = maukaAlignment >= 0;
-  const mitigation = getMitigationEffects(config);
+  const flow = getFlowComponents(config.windBearing);
+  const alignmentPercent = flow.crossRowAlignment * 100;
 
-  // This Strouhal estimate uses one panel chord as the panel-scale wake length.
-  const sheddingFrequencyHz = (0.13 * speedMs) / PANEL_SLOPE_M;
+  // This Strouhal estimate uses the panel chord and the wind component across each rack.
+  const sheddingVelocity = speedMs * (0.38 + 0.62 * flow.crossRowAlignment);
+  const sheddingFrequencyHz = (0.13 * sheddingVelocity) / PANEL_SLOPE_M;
   const frequencyRatio = sheddingFrequencyHz / Math.max(0.3, config.panelFrequencyHz);
-  const dampingRatio = (config.dampingPercent + mitigation.dampingBoost) / 100;
-  const rawDynamicFactor = 1 / Math.sqrt(
-    Math.pow(1 - frequencyRatio * frequencyRatio, 2) +
-      Math.pow(2 * dampingRatio * frequencyRatio, 2),
-  );
-  const dynamicFactor = clamp(rawDynamicFactor, 0.45, 8);
 
-  const rows = Array.from({ length: ROW_COUNT }, (_, index): RowResult => {
-    // Site convention: Row 1 is the front/makai row. Row 7 is the rear/mauka row.
-    const downstreamIndex = flowFromMauka ? ROW_COUNT - 1 - index : index;
-    const wakeRows = Math.round(downstreamIndex * crossRowAlignment);
-    const wakeBuild = crossRowAlignment * (1 - Math.exp(-wakeRows / 1.8));
-    const downstreamFraction = downstreamIndex / (ROW_COUNT - 1);
-    const ambientTi = config.ambientTurbulence / 100;
-    const localTi = clamp(
-      (ambientTi + wakeBuild * 0.205 + Math.pow(downstreamFraction, 2) * crossRowAlignment * 0.035) *
-        mitigation.turbulenceFactor,
-      0.035,
-      0.42,
+  const wakeSources = ROW_COLUMN_COUNTS.flatMap((columnCount, rowIndex) => {
+    const row = rowIndex + 1;
+    const rowEffects = getLocalMitigationEffects(config, row);
+    return Array.from({ length: columnCount }, (_, columnIndex) => {
+      const xM = getRowOffsetX(row) + (columnIndex - (columnCount - 1) / 2) * MODULE_PITCH_M;
+      const zM = getRowCenterZ(row);
+      const screenEffects = getScreenFlowEffects(config, xM, zM, flow);
+      return {
+        row,
+        column: columnIndex + 1,
+        xM,
+        zM,
+        wakeFactor:
+          rowEffects.wakeSourceFactor *
+          screenEffects.turbulenceFactor *
+          screenEffects.speedFactor,
+      };
+    });
+  });
+
+  const rows = Array.from({ length: ROW_COUNT }, (_, rowIndex): RowResult => {
+    const row = rowIndex + 1;
+    const columnCount = ROW_COLUMN_COUNTS[rowIndex];
+    const rowEffects = getLocalMitigationEffects(config, row);
+    const panels = Array.from(
+      { length: columnCount * PANELS_DEEP_PER_ROW },
+      (_, panelIndex): PanelResult => {
+        const coordinates = getPanelCoordinates(row, panelIndex + 1);
+        const columnIndex = coordinates.column - 1;
+        const depthIndex = coordinates.depth - 1;
+        let wakeEnergy = 0;
+        const contributingRows = new Set<number>();
+
+        for (const source of wakeSources) {
+          if (source.row === row && source.column === coordinates.column) continue;
+          const dx = coordinates.xM - source.xM;
+          const dz = coordinates.zM - source.zM;
+          const downstreamDistance = dx * flow.x + dz * flow.z;
+          if (downstreamDistance <= 0.45) continue;
+
+          const lateralDistance = Math.abs(-dx * flow.z + dz * flow.x);
+          const wakeHalfWidth = MODULE_PITCH_M * 0.58 + downstreamDistance * 0.11;
+          const lateralWeight = Math.exp(-0.5 * Math.pow(lateralDistance / wakeHalfWidth, 2));
+          const distanceDecay = Math.exp(-downstreamDistance / (ROW_SPACING_M * 3.6));
+          const nearFieldBuild = 1 - Math.exp(-downstreamDistance / 1.2);
+          const orientationFactor = 0.34 + 0.66 * flow.crossRowAlignment;
+          const wakeStrength =
+            orientationFactor * lateralWeight * distanceDecay * nearFieldBuild * source.wakeFactor;
+          wakeEnergy += wakeStrength * wakeStrength;
+          if (wakeStrength > 0.12) contributingRows.add(source.row);
+        }
+
+        const wakeAmplitude = Math.sqrt(wakeEnergy);
+        const wakeBuild = clamp(1 - Math.exp(-0.34 * wakeAmplitude), 0, 0.94);
+        const upwindColumnDistance =
+          (flow.x >= 0 ? columnIndex : columnCount - 1 - columnIndex) * MODULE_PITCH_M;
+        const upwindDepthDistance =
+          (flow.z >= 0 ? depthIndex : PANELS_DEEP_PER_ROW - 1 - depthIndex) *
+          (PANEL_SLOPE_M + PANEL_GAP_M);
+        const lateralEdgeExposure =
+          Math.abs(flow.x) * Math.exp(-upwindColumnDistance / Math.max(1.2, MODULE_PITCH_M * 2.8));
+        const crossRowEdgeExposure =
+          Math.abs(flow.z) * Math.exp(-upwindDepthDistance / Math.max(1.2, PANEL_SLOPE_M));
+        const edgeExposure = clamp(0.72 * lateralEdgeExposure + 0.42 * crossRowEdgeExposure, 0, 1);
+        const screenEffects = getScreenFlowEffects(config, coordinates.xM, coordinates.zM, flow);
+        const localTi = clamp(
+          (config.ambientTurbulence / 100 + wakeBuild * 0.215 + edgeExposure * 0.045) *
+            rowEffects.turbulenceFactor *
+            screenEffects.turbulenceFactor,
+          0.035,
+          0.42,
+        );
+
+        const dampingRatio = (config.dampingPercent + rowEffects.dampingBoost) / 100;
+        const rawDynamicFactor = 1 / Math.sqrt(
+          Math.pow(1 - frequencyRatio * frequencyRatio, 2) +
+            Math.pow(2 * dampingRatio * frequencyRatio, 2),
+        );
+        const dynamicFactor = clamp(rawDynamicFactor, 0.45, 8);
+        const resonanceWeight = clamp((dynamicFactor - 0.45) / 4.6, 0.12, 1.45);
+        const shelter = 1 - 0.11 * wakeBuild;
+        const maukaUplift = Math.max(0, flow.z);
+        const undersideCoefficient = 0.49 + 0.38 * maukaUplift;
+        const pressureFactor = rowEffects.pressureFactor * screenEffects.pressureFactor;
+        const meanUpliftKpa = dynamicPressureKpa * undersideCoefficient * shelter * pressureFactor;
+        const peakUpliftKpa =
+          dynamicPressureKpa *
+          (undersideCoefficient * shelter + edgeExposure * 0.21 + 2.45 * localTi) *
+          pressureFactor;
+        const vibrationIndex = clamp(
+          100 *
+            (dynamicPressureKpa / 0.95) *
+            (localTi / 0.3) *
+            resonanceWeight *
+            (0.74 + 0.26 * wakeBuild),
+          0,
+          100,
+        );
+
+        return {
+          ...coordinates,
+          contributingWakeRows: contributingRows.size,
+          turbulencePercent: localTi * 100,
+          meanUpliftKpa,
+          peakUpliftKpa,
+          vibrationIndex,
+          dynamicFactor,
+        };
+      },
     );
 
-    // The mean field receives mild shelter. The peak field includes wake fluctuations.
-    const shelter = 1 - 0.11 * wakeBuild;
-    const undersideCoefficient = 0.49 + 0.38 * Math.max(0, maukaAlignment);
-    const exposedEdge = crossRowAlignment * Math.pow(downstreamFraction, 2) * 0.21;
-    const widthRatio = ROW_COLUMN_COUNTS[index] / MODULES_PER_ROW;
-    const partialRowEdge =
-      (1 - widthRatio) * crossRowAlignment * 0.08 * (0.35 + 0.65 * downstreamFraction);
-    const meanUpliftKpa = dynamicPressureKpa * undersideCoefficient * shelter * mitigation.pressureFactor;
-    const peakUpliftKpa =
-      dynamicPressureKpa *
-      (undersideCoefficient * shelter + exposedEdge + partialRowEdge + 2.45 * localTi) *
-      mitigation.pressureFactor;
-    const resonanceWeight = clamp((dynamicFactor - 0.45) / 4.6, 0.12, 1.45);
-    const vibrationIndex = clamp(
-      100 *
-        (dynamicPressureKpa / 0.95) *
-        (localTi / 0.3) *
-        resonanceWeight *
-        (0.72 + 0.28 * downstreamFraction),
-      0,
-      100,
+    const peakPanel = panels.reduce((current, panel) =>
+      panel.peakUpliftKpa > current.peakUpliftKpa ? panel : current,
     );
-
     return {
-      row: index + 1,
-      position: index === 0 ? "FRONT" : index === ROW_COUNT - 1 ? "REAR" : "MID",
-      wakeRows,
-      turbulencePercent: localTi * 100,
-      meanUpliftKpa,
-      peakUpliftKpa,
-      vibrationIndex,
-      dynamicFactor,
+      row,
+      position: row === 1 ? "FRONT" : row === ROW_COUNT ? "REAR" : "MID",
+      wakeRows: Math.max(...panels.map((panel) => panel.contributingWakeRows)),
+      turbulencePercent: Math.max(...panels.map((panel) => panel.turbulencePercent)),
+      meanUpliftKpa:
+        panels.reduce((total, panel) => total + panel.meanUpliftKpa, 0) / panels.length,
+      peakUpliftKpa: peakPanel.peakUpliftKpa,
+      vibrationIndex: Math.max(...panels.map((panel) => panel.vibrationIndex)),
+      dynamicFactor: Math.max(...panels.map((panel) => panel.dynamicFactor)),
+      peakColumn: peakPanel.column,
+      panels,
     };
   });
 
-  const peak = rows.reduce((current, row) => (row.peakUpliftKpa > current.peakUpliftKpa ? row : current));
+  const peak = rows
+    .flatMap((row) => row.panels)
+    .reduce((current, panel) =>
+      panel.peakUpliftKpa > current.peakUpliftKpa ? panel : current,
+    );
   const vibration = rows.reduce((current, row) => Math.max(current, row.vibrationIndex), 0);
   const front = rows[0].peakUpliftKpa;
   const rear = rows[rows.length - 1].peakUpliftKpa;
@@ -294,6 +532,8 @@ export function simulate(config: SimulationConfig): SimulationResult {
     sheddingFrequencyHz,
     peakUpliftKpa: peak.peakUpliftKpa,
     peakRow: peak.row,
+    peakColumn: peak.column,
+    peakModule: peak.module,
     vibrationIndex: vibration,
     frontRearRatio: rear > 0 ? front / rear : 1,
     alignmentPercent,

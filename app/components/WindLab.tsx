@@ -46,6 +46,7 @@ import {
   TABLE_CHORD_M,
   TOTAL_PANEL_COUNT,
   cardinalDirection,
+  getPanelResult,
   riskColor,
   simulate,
   type MitigationId,
@@ -75,7 +76,8 @@ export function WindLab() {
   const [mitigation, setMitigation] = useState<MitigationId>("none");
   const [screenPorosity, setScreenPorosity] = useState(40);
   const [screenHeightM, setScreenHeightM] = useState(2.2);
-  const [screenProtectedRows, setScreenProtectedRows] = useState(7);
+  const [screenStartRow, setScreenStartRow] = useState(7);
+  const [screenEndRow, setScreenEndRow] = useState(7);
   const [vaneLengthM, setVaneLengthM] = useState(Number(TABLE_CHORD_M.toFixed(2)));
   const [vaneRowCount, setVaneRowCount] = useState(3);
   const [spoilerStyle, setSpoilerStyle] = useState<SpoilerStyle>("perforated");
@@ -106,7 +108,8 @@ export function WindLab() {
       mitigation,
       screenPorosity,
       screenHeightM,
-      screenProtectedRows,
+      screenStartRow,
+      screenEndRow,
       vaneLengthM,
       vaneRowCount,
       spoilerStyle,
@@ -126,7 +129,8 @@ export function WindLab() {
       mitigation,
       screenPorosity,
       screenHeightM,
-      screenProtectedRows,
+      screenStartRow,
+      screenEndRow,
       vaneLengthM,
       vaneRowCount,
       spoilerStyle,
@@ -139,7 +143,7 @@ export function WindLab() {
     ],
   );
   const result = useMemo(() => simulate(config), [config]);
-  const selectedResult = result.rows[selectedPanel.row - 1];
+  const selectedResult = getPanelResult(result, selectedPanel.row, selectedPanel.module);
   const baselineResult = useMemo(() => simulate({ ...config, mitigation: "none" }), [config]);
   const comparisons = useMemo(
     () => mitigationOrder.map((id) => ({ id, result: simulate({ ...config, mitigation: id }) })),
@@ -166,7 +170,8 @@ export function WindLab() {
     setMitigation("none");
     setScreenPorosity(40);
     setScreenHeightM(2.2);
-    setScreenProtectedRows(7);
+    setScreenStartRow(7);
+    setScreenEndRow(7);
     setVaneLengthM(Number(TABLE_CHORD_M.toFixed(2)));
     setVaneRowCount(3);
     setSpoilerStyle("perforated");
@@ -317,7 +322,7 @@ export function WindLab() {
               label="Peak uplift"
               value={result.peakUpliftKpa.toFixed(2)}
               unit="kPa"
-              note={`Row ${result.peakRow}`}
+              note={`Row ${result.peakRow} · Col ${result.peakColumn}`}
               color={riskColor(result.peakUpliftKpa, 1.8)}
             />
             <Metric
@@ -478,18 +483,16 @@ export function WindLab() {
                     accent={MITIGATIONS.screen.color}
                     compact
                   />
-                  <ControlSlider
-                    label="Rows protected"
-                    value={screenProtectedRows}
-                    min={1}
-                    max={ROW_COUNT}
-                    step={1}
-                    unit="rows"
-                    onChange={setScreenProtectedRows}
+                  <RowRangeSlider
+                    startRow={screenStartRow}
+                    endRow={screenEndRow}
+                    onStartChange={setScreenStartRow}
+                    onEndChange={setScreenEndRow}
                     accent={MITIGATIONS.screen.color}
-                    compact
                   />
-                  <p>{screenPorosity}% of the screen area is open. Coverage starts at Row 1.</p>
+                  <p>
+                    A screen sits behind each included row. Row 7 is the rear mauka row.
+                  </p>
                 </>
               ) : null}
 
@@ -660,7 +663,9 @@ export function WindLab() {
             <div className="selected-panel-head">
               <div>
                 <span className="eyebrow selection-eyebrow"><i /> ACTIVE SELECTION</span>
-                <strong>Row {selectedPanel.row} · Panel {selectedPanel.module}</strong>
+                <strong>
+                  Row {selectedPanel.row} · Column {selectedResult.column} · Panel {selectedPanel.module}
+                </strong>
               </div>
               <CircleGauge size={20} style={{ color: riskColor(selectedResult.vibrationIndex) }} />
             </div>
@@ -680,7 +685,7 @@ export function WindLab() {
       </section>
 
       <footer className="lab-footer">
-        <span><span className="status-dot" /> SITE CALIBRATION V0.6 · PHOTO ESTIMATE</span>
+        <span><span className="status-dot" /> SITE CALIBRATION V0.7 · PANEL FIELD</span>
         <span>JINKO 365 W · {PANEL_LENGTH_M.toFixed(3)} × {PANEL_WIDTH_M.toFixed(3)} m · {PANEL_TILT_DEG.toFixed(1)}° TILT</span>
         <span>{TOTAL_PANEL_COUNT} PRE-STORM · R1/R7 {ROW_PANEL_COUNTS[0]} EACH · {ROW_SPACING_M.toFixed(2)} m PITCH · {ROW_STAGGER_M.toFixed(2)} m STAGGER</span>
       </footer>
@@ -751,7 +756,7 @@ export function WindLab() {
           <section className="modal assumptions-modal" role="dialog" aria-modal="true" aria-label="Model assumptions" onMouseDown={(event) => event.stopPropagation()}>
             <div className="modal-head">
               <div>
-                <span className="eyebrow">MODEL BASIS · V0.6</span>
+                <span className="eyebrow">MODEL BASIS · V0.7</span>
                 <h2>What this model can test</h2>
               </div>
               <button className="icon-button" onClick={() => setShowAssumptions(false)} aria-label="Close assumptions"><X size={18} /></button>
@@ -759,8 +764,8 @@ export function WindLab() {
             <div className="assumption-grid">
               <article><span>01</span><h3>Photo-counted geometry</h3><p>Rows 1 and 7 have 14 southeast-aligned columns. Rows 2–6 have 28 columns. Each table uses two portrait panels along the slope.</p></article>
               <article><span>07</span><h3>Staggered row layout</h3><p>The rows form a southeast echelon. Each rearward row shifts {ROW_STAGGER_M.toFixed(2)} m southeast. Row centers use a {ROW_SPACING_M.toFixed(2)} m pitch.</p></article>
-              <article><span>02</span><h3>Flow response</h3><p>The particle field follows each rack surface. It models underside acceleration, surface blocking, wake decay, and turbulence. It is not full CFD.</p></article>
-              <article><span>03</span><h3>Vibration</h3><p>The model compares a panel-scale shedding estimate with an adjustable natural frequency and damping ratio.</p></article>
+              <article><span>02</span><h3>Panel flow field</h3><p>The solver evaluates all {TOTAL_PANEL_COUNT} panels. It tracks angled wake overlap, exposed columns, row stagger, screen shelter, and wake decay.</p></article>
+              <article><span>03</span><h3>Local vibration</h3><p>Each panel uses its local turbulence and pressure. Dampers change only the fitted rows. This model is not full CFD.</p></article>
               <article><span>04</span><h3>Array totals</h3><p>The estimate has {TOTAL_PANEL_COUNT} panels before the storm. It has {POST_STORM_PANEL_COUNT} after Rows 1 and 2 are removed.</p></article>
               <article><span>05</span><h3>Estimated rack</h3><p>The rack uses a {TABLE_CHORD_M.toFixed(2)} m slope and {LOW_EDGE_CLEARANCE_M.toFixed(2)}–{HIGH_EDGE_CLEARANCE_M.toFixed(2)} m clearance. Full rows use {RACK_SUPPORTS_PER_ROW} support frames and four rails.</p></article>
               <article><span>06</span><h3>Recorded wind</h3><p>The sound control uses the CC0 “Steady wind” recording from the USC/Sunset sound-effects collection. Speed controls its gain and playback rate.</p></article>
@@ -783,6 +788,73 @@ function Metric({ label, value, unit, note, color }: { label: string; value: str
       </div>
       <span className="metric-note">{note}</span>
     </div>
+  );
+}
+
+function RowRangeSlider({
+  startRow,
+  endRow,
+  onStartChange,
+  onEndChange,
+  accent,
+}: {
+  startRow: number;
+  endRow: number;
+  onStartChange: (value: number) => void;
+  onEndChange: (value: number) => void;
+  accent: string;
+}) {
+  const min = 1;
+  const max = ROW_COUNT;
+  const startPercent = ((startRow - min) / (max - min)) * 100;
+  const endPercent = ((endRow - min) / (max - min)) * 100;
+  const rangeLabel = startRow === endRow ? `Row ${startRow}` : `Rows ${startRow}–${endRow}`;
+
+  return (
+    <fieldset className="row-range-control">
+      <legend>
+        <span>Screen placement</span>
+        <strong>{rangeLabel}</strong>
+      </legend>
+      <div
+        className={`row-range-track ${startRow === endRow ? "is-collapsed" : ""}`}
+        style={{
+          "--range-start": `${startPercent}%`,
+          "--range-end": `${endPercent}%`,
+          "--slider-accent": accent,
+        } as React.CSSProperties}
+      >
+        <div className="row-range-fill" />
+        <input
+          className="row-range-start"
+          aria-label="First row with a screen behind it"
+          aria-valuetext={`Row ${startRow}`}
+          type="range"
+          min={min}
+          max={max}
+          step={1}
+          value={startRow}
+          onChange={(event) => onStartChange(Math.min(Number(event.target.value), endRow))}
+          style={{ zIndex: startRow === endRow ? 4 : 3 }}
+        />
+        <input
+          className="row-range-end"
+          aria-label="Last row with a screen behind it"
+          aria-valuetext={`Row ${endRow}`}
+          type="range"
+          min={min}
+          max={max}
+          step={1}
+          value={endRow}
+          onChange={(event) => onEndChange(Math.max(Number(event.target.value), startRow))}
+          style={{ zIndex: 2 }}
+        />
+      </div>
+      <div className="row-range-labels">
+        <span>ROW 1 · FRONT</span>
+        <span>ROW 7 · REAR</span>
+      </div>
+    </fieldset>
   );
 }
 

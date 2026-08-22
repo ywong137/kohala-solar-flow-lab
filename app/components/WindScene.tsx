@@ -4,10 +4,9 @@ import { useEffect, useRef } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import {
-  ARRAY_AXIS_BEARING,
   LOW_EDGE_CLEARANCE_M,
-  MAUKA_BEARING,
   MITIGATIONS,
+  MODULE_PITCH_M,
   MODULES_PER_ROW,
   PANEL_GAP_M,
   PANELS_DEEP_PER_ROW,
@@ -17,15 +16,19 @@ import {
   PANEL_THICKNESS_M,
   RACK_SUPPORTS_PER_ROW,
   ROW_COLUMN_COUNTS,
-  ROW_COLUMN_OFFSETS,
   ROW_COUNT,
   ROW_PANEL_COUNTS,
   ROW_SPACING_M,
   ROW_STAGGER_M,
-  ROW_STAGGER_OFFSETS_M,
   TABLE_CHORD_M,
-  circularDifference,
-  getMitigationEffects,
+  getFlowComponents,
+  getInstalledScreenRows,
+  getPanelResult,
+  getRowCenterZ,
+  getRowOffsetX,
+  getRowWidth,
+  getScreenFlowEffects,
+  getScreenGeometry,
   type SimulationConfig,
   type SimulationResult,
   type ViewMode,
@@ -277,28 +280,25 @@ export function WindScene({
     const tilt = THREE.MathUtils.degToRad(PANEL_TILT_DEG);
     const lowEdgeHeight = LOW_EDGE_CLEARANCE_M;
     const centerHeight = lowEdgeHeight + Math.sin(tilt) * TABLE_CHORD_M * 0.5;
-    const modulePitch = PANEL_SPAN_M + PANEL_GAP_M;
+    const modulePitch = MODULE_PITCH_M;
     const fullRowWidth = MODULES_PER_ROW * modulePitch - PANEL_GAP_M;
     const tableHorizontalDepth = Math.cos(tilt) * TABLE_CHORD_M;
-    const getRowOffsetX = (index: number) =>
-      ROW_COLUMN_OFFSETS[index] * modulePitch + ROW_STAGGER_OFFSETS_M[index];
     const rowFlowGeometry = ROW_COLUMN_COUNTS.map((columns, index) => ({
       row: index + 1,
-      z: ((ROW_COUNT - 1) / 2 - index) * ROW_SPACING_M,
-      offsetX: getRowOffsetX(index),
-      width: columns * modulePitch - PANEL_GAP_M,
+      z: getRowCenterZ(index + 1),
+      offsetX: getRowOffsetX(index + 1),
+      width: getRowWidth(index + 1),
     }));
     const arrayMinX = Math.min(...rowFlowGeometry.map((row) => row.offsetX - row.width / 2));
     const arrayMaxX = Math.max(...rowFlowGeometry.map((row) => row.offsetX + row.width / 2));
     const arrayCenterX = (arrayMinX + arrayMaxX) / 2;
-    const arrayWidth = arrayMaxX - arrayMinX;
 
     for (let rowIndex = 0; rowIndex < ROW_COUNT; rowIndex += 1) {
       const rowNumber = rowIndex + 1;
-      const z = ((ROW_COUNT - 1) / 2 - rowIndex) * ROW_SPACING_M;
+      const z = getRowCenterZ(rowNumber);
       const rowColumns = ROW_COLUMN_COUNTS[rowIndex];
-      const rowOffsetX = getRowOffsetX(rowIndex);
-      const rowWidth = rowColumns * modulePitch - PANEL_GAP_M;
+      const rowOffsetX = getRowOffsetX(rowNumber);
+      const rowWidth = getRowWidth(rowNumber);
 
       for (let depthIndex = 0; depthIndex < PANELS_DEEP_PER_ROW; depthIndex += 1) {
         const panelZ = (depthIndex - (PANELS_DEEP_PER_ROW - 1) / 2) * (PANEL_SLOPE_M + PANEL_GAP_M);
@@ -448,21 +448,39 @@ export function WindScene({
     });
 
     const screenGroup = new THREE.Group();
-    const screenPosts: THREE.Mesh[] = [];
-    const screenSlats: THREE.Mesh[] = [];
-    const screenZ = -((ROW_COUNT - 1) / 2) * ROW_SPACING_M - 4.5;
-    for (let post = 0; post < 9; post += 1) {
-      const x = arrayMinX - 0.7 + post * ((arrayWidth + 1.4) / 8);
-      const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.055, 1, 10), screenMaterial);
-      pole.position.set(x, 1.1, screenZ);
-      screenGroup.add(pole);
-      screenPosts.push(pole);
-    }
-    for (let strip = 0; strip < 12; strip += 1) {
-      const slat = new THREE.Mesh(new THREE.BoxGeometry(arrayWidth + 1.4, 1, 0.075), screenMaterial);
-      slat.position.set(arrayCenterX, 0.2 + strip * 0.18, screenZ);
-      screenGroup.add(slat);
-      screenSlats.push(slat);
+    const screenAssemblies: Array<{
+      row: number;
+      group: THREE.Group;
+      posts: THREE.Mesh[];
+      slats: THREE.Mesh[];
+    }> = [];
+    for (let row = 1; row <= ROW_COUNT; row += 1) {
+      const geometry = getScreenGeometry(row);
+      const group = new THREE.Group();
+      const posts: THREE.Mesh[] = [];
+      const slats: THREE.Mesh[] = [];
+      const postCount = Math.max(5, Math.ceil(geometry.width / 4) + 1);
+      for (let post = 0; post < postCount; post += 1) {
+        const x = geometry.x - geometry.width / 2 + post * (geometry.width / (postCount - 1));
+        const pole = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.055, 0.055, 1, 10),
+          screenMaterial,
+        );
+        pole.position.set(x, 1.1, geometry.z);
+        group.add(pole);
+        posts.push(pole);
+      }
+      for (let strip = 0; strip < 12; strip += 1) {
+        const slat = new THREE.Mesh(
+          new THREE.BoxGeometry(geometry.width, 1, 0.075),
+          screenMaterial,
+        );
+        slat.position.set(geometry.x, 0.2 + strip * 0.18, geometry.z);
+        group.add(slat);
+        slats.push(slat);
+      }
+      screenGroup.add(group);
+      screenAssemblies.push({ row, group, posts, slats });
     }
     scene.add(screenGroup);
     mitigationGroups.screen = screenGroup;
@@ -470,10 +488,10 @@ export function WindScene({
     const vaneGroup = new THREE.Group();
     const vaneVisuals: THREE.Mesh[] = [];
     for (let row = 1; row <= ROW_COUNT; row += 1) {
-      const z = ((ROW_COUNT - 1) / 2 - (row - 1)) * ROW_SPACING_M;
+      const z = getRowCenterZ(row);
       const rowColumns = ROW_COLUMN_COUNTS[row - 1];
-      const rowOffsetX = getRowOffsetX(row - 1);
-      const rowWidth = rowColumns * modulePitch - PANEL_GAP_M;
+      const rowOffsetX = getRowOffsetX(row);
+      const rowWidth = getRowWidth(row);
       const vaneCount = rowColumns === MODULES_PER_ROW ? 7 : 3;
       for (let vane = 0; vane < vaneCount; vane += 1) {
         const fin = new THREE.Mesh(new THREE.BoxGeometry(0.075, 0.72, 1), vaneMaterial);
@@ -500,10 +518,10 @@ export function WindScene({
     const spoilerVisuals: THREE.Mesh[] = [];
     Object.values(spoilerStyleGroups).forEach((group) => spoilerGroup.add(group));
     for (let row = 1; row <= ROW_COUNT; row += 1) {
-      const edgeZ = ((ROW_COUNT - 1) / 2 - (row - 1)) * ROW_SPACING_M + tableHorizontalDepth / 2;
+      const edgeZ = getRowCenterZ(row) + tableHorizontalDepth / 2;
       const rowColumns = ROW_COLUMN_COUNTS[row - 1];
-      const rowOffsetX = getRowOffsetX(row - 1);
-      const rowWidth = rowColumns * modulePitch - PANEL_GAP_M;
+      const rowOffsetX = getRowOffsetX(row);
+      const rowWidth = getRowWidth(row);
       const continuous = new THREE.Mesh(new THREE.BoxGeometry(rowWidth, 1, 0.075), spoilerMaterial);
       continuous.position.set(rowOffsetX, lowEdgeHeight + 0.15, edgeZ);
       continuous.userData.row = row;
@@ -534,10 +552,9 @@ export function WindScene({
     const damperGlows: THREE.PointLight[] = [];
     const maxDampersPerRail = Math.ceil(fullRowWidth / 0.8) + 1;
     for (let row = 1; row <= ROW_COUNT; row += 1) {
-      const z = ((ROW_COUNT - 1) / 2 - (row - 1)) * ROW_SPACING_M;
-      const rowColumns = ROW_COLUMN_COUNTS[row - 1];
-      const rowOffsetX = getRowOffsetX(row - 1);
-      const rowWidth = rowColumns * modulePitch - PANEL_GAP_M;
+      const z = getRowCenterZ(row);
+      const rowOffsetX = getRowOffsetX(row);
+      const rowWidth = getRowWidth(row);
       for (const railZ of [-TABLE_CHORD_M * 0.39, -TABLE_CHORD_M * 0.13, TABLE_CHORD_M * 0.13, TABLE_CHORD_M * 0.39]) {
         const set: THREE.Mesh[] = [];
         const railHeight = centerHeight - Math.sin(tilt) * railZ - 0.12;
@@ -675,14 +692,18 @@ export function WindScene({
       visualSpeed: number,
       elapsed: number,
       live: typeof liveRef.current,
-      effects: ReturnType<typeof getMitigationEffects>,
       out: FlowSample,
     ) => {
       const crossRowAlignment = Math.abs(flowZ);
       const flowSign = flowZ >= 0 ? 1 : -1;
       const transverseX = -flowZ;
       const transverseZ = flowX;
-      let speedFactor = live.config.mitigation === "screen" ? Math.sqrt(effects.pressureFactor) : 1;
+      const screenEffects = getScreenFlowEffects(live.config, x, z, {
+        x: flowX,
+        z: flowZ,
+        crossRowAlignment,
+      });
+      let speedFactor = screenEffects.speedFactor;
       let verticalVelocity = 0;
       let lateralVelocity = 0;
       let turbulence = (live.config.ambientTurbulence / 100) * 0.55;
@@ -695,7 +716,14 @@ export function WindScene({
         const downstreamDistance = dz * flowSign;
         const halfDepth = tableHorizontalDepth / 2;
         const panelHeight = centerHeight - Math.tan(tilt) * dz;
-        const rowTurbulence = live.result.rows[row.row - 1].turbulencePercent / 100;
+        const rowResult = live.result.rows[row.row - 1];
+        const columnCount = ROW_COLUMN_COUNTS[row.row - 1];
+        const columnIndex = clamp(
+          Math.round((x - row.offsetX) / modulePitch + (columnCount - 1) / 2),
+          0,
+          columnCount - 1,
+        );
+        const rowTurbulence = rowResult.panels[columnIndex].turbulencePercent / 100;
 
         if (Math.abs(dz) <= halfDepth + 0.12) {
           const abovePanel = y >= panelHeight;
@@ -748,7 +776,7 @@ export function WindScene({
         verticalVelocity += (1 - y / 0.24) * visualSpeed * 0.28;
       }
 
-      const localTurbulence = clamp(turbulence * effects.turbulenceFactor, 0.018, 0.46);
+      const localTurbulence = clamp(turbulence * screenEffects.turbulenceFactor, 0.018, 0.46);
       const localSpeed = visualSpeed * clamp(speedFactor, 0.5, 1.34);
       out.vx = flowX * localSpeed + transverseX * lateralVelocity;
       out.vy = verticalVelocity;
@@ -763,15 +791,10 @@ export function WindScene({
       const delta = Math.min(clock.getDelta(), 0.04);
       const elapsed = clock.elapsedTime;
       const live = liveRef.current;
-      const flowBearing = (live.config.windBearing + 180) % 360;
-      const flowX = Math.cos(THREE.MathUtils.degToRad(circularDifference(flowBearing, ARRAY_AXIS_BEARING)));
-      const flowZ = Math.cos(THREE.MathUtils.degToRad(circularDifference(flowBearing, MAUKA_BEARING + 180)));
-      const flowLength = Math.hypot(flowX, flowZ) || 1;
-      const normalizedFlowX = flowX / flowLength;
-      const normalizedFlowZ = flowZ / flowLength;
+      const flow = getFlowComponents(live.config.windBearing);
+      const normalizedFlowX = flow.x;
+      const normalizedFlowZ = flow.z;
       const visualSpeed = live.config.windSpeedMph * 0.44704 * 0.19;
-      const mitigationEffects = getMitigationEffects(live.config);
-
       if (live.cameraRequest !== lastCameraRequest) {
         setCamera(live.cameraView);
         lastCameraRequest = live.cameraRequest;
@@ -781,11 +804,17 @@ export function WindScene({
         live.viewMode,
         live.result.peakUpliftKpa.toFixed(3),
         live.result.vibrationIndex.toFixed(1),
+        live.config.windSpeedMph,
+        live.config.windBearing,
+        live.config.ambientTurbulence,
+        live.config.panelFrequencyHz,
+        live.config.dampingPercent,
         live.showDamage,
         live.config.mitigation,
         live.config.screenPorosity,
         live.config.screenHeightM,
-        live.config.screenProtectedRows,
+        live.config.screenStartRow,
+        live.config.screenEndRow,
         live.config.vaneLengthM,
         live.config.vaneRowCount,
         live.config.spoilerStyle,
@@ -802,12 +831,12 @@ export function WindScene({
         const maxPressure = Math.max(...live.result.rows.map((row) => row.peakUpliftKpa), 0.01);
         let activePanel: PanelVisual | null = null;
         for (const panel of panelVisuals) {
-          const rowResult = live.result.rows[panel.row - 1];
+          const panelResult = getPanelResult(live.result, panel.row, panel.module);
           const selected = panel.row === live.selectedPanel.row && panel.module === live.selectedPanel.module;
           const risk = live.viewMode === "pressure"
-            ? rowResult.peakUpliftKpa / maxPressure
+            ? panelResult.peakUpliftKpa / maxPressure
             : live.viewMode === "vibration"
-              ? rowResult.vibrationIndex / 100
+              ? panelResult.vibrationIndex / 100
               : 0.12;
           const color = new THREE.Color().setHSL(0.54 * (1 - clamp(risk, 0, 1)), 0.82, 0.43 + risk * 0.08);
           panel.glass.material.color.copy(color);
@@ -826,16 +855,20 @@ export function WindScene({
         }
 
         const screenHeight = live.config.screenHeightM;
-        const screenCellHeight = screenHeight / screenSlats.length;
-        const screenSolidHeight = screenCellHeight * (1 - live.config.screenPorosity / 100);
-        screenPosts.forEach((post) => {
-          post.scale.y = screenHeight;
-          post.position.y = screenHeight / 2;
-        });
-        screenSlats.forEach((slat, index) => {
-          slat.scale.y = Math.max(0.015, screenSolidHeight);
-          slat.position.y = (index + 0.5) * screenCellHeight;
-        });
+        const activeScreenRows = new Set(getInstalledScreenRows(live.config));
+        for (const screen of screenAssemblies) {
+          const screenCellHeight = screenHeight / screen.slats.length;
+          const screenSolidHeight = screenCellHeight * (1 - live.config.screenPorosity / 100);
+          screen.group.visible = activeScreenRows.has(screen.row);
+          screen.posts.forEach((post) => {
+            post.scale.y = screenHeight;
+            post.position.y = screenHeight / 2;
+          });
+          screen.slats.forEach((slat, index) => {
+            slat.scale.y = Math.max(0.015, screenSolidHeight);
+            slat.position.y = (index + 0.5) * screenCellHeight;
+          });
+        }
 
         for (const vane of vaneVisuals) {
           vane.scale.z = live.config.vaneLengthM;
@@ -897,7 +930,6 @@ export function WindScene({
             visualSpeed,
             elapsed,
             live,
-            mitigationEffects,
             particleFlowSample,
           );
 
@@ -979,7 +1011,6 @@ export function WindScene({
             Math.max(visualSpeed, 0.1),
             elapsed,
             live,
-            mitigationEffects,
             streamlineFlowSample,
           );
           const horizontalSpeed = Math.max(
@@ -1003,8 +1034,8 @@ export function WindScene({
       selectionMarker.scale.setScalar(selectionPulse);
       selectionMaterial.opacity = 0.86 + Math.sin(elapsed * 3.2) * 0.1;
       for (const panel of panelVisuals) {
-        const rowResult = live.result.rows[panel.row - 1];
-        const amplitude = vibrationScale * rowResult.vibrationIndex * 0.00011;
+        const panelResult = getPanelResult(live.result, panel.row, panel.module);
+        const amplitude = vibrationScale * panelResult.vibrationIndex * 0.00011;
         const phase = panel.module * 0.31 + panel.row * 0.72;
         panel.assembly.rotation.x = panel.baseRotationX + Math.sin(elapsed * Math.PI * 4 + phase) * amplitude;
         panel.assembly.rotation.z = Math.cos(elapsed * Math.PI * 4.4 + phase) * amplitude * 0.62;
@@ -1050,8 +1081,14 @@ export function WindScene({
       </div>
       <div className="scene-corner scene-solver">
         <span className="solver-pulse" />
-        <span>REDUCED-ORDER SOLVER</span>
-        <strong>{MITIGATIONS[config.mitigation].short}</strong>
+        <span>{ROW_PANEL_COUNTS.reduce((total, panels) => total + panels, 0)}-PANEL FIELD SOLVER</span>
+        <strong>
+          {config.mitigation === "screen"
+            ? config.screenStartRow === config.screenEndRow
+              ? `SCREEN BEHIND ROW ${config.screenStartRow}`
+              : `SCREENS BEHIND ROWS ${config.screenStartRow}–${config.screenEndRow}`
+            : MITIGATIONS[config.mitigation].short}
+        </strong>
       </div>
       <div className="scene-drag-hint">Drag to orbit · Scroll to zoom · Select a panel</div>
     </div>
