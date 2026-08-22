@@ -8,7 +8,7 @@ The model includes:
 - editable row counts, offsets, spacing, tilt, rack clearance, and dynamics;
 - porous screens, under-panel vanes, edge deflectors, and rail dampers;
 - immediate damage, post-storm cleanup, and fully restored site views;
-- photo-based gravel, wall, fence, field, ocean, hills, and sky geometry.
+- photo-based gravel, a southeast retaining wall, a raised field, fences, ocean, hills, and sky geometry.
 
 This is a screening model. It is not final CFD or a structural design calculation.
 

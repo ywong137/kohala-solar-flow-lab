@@ -345,15 +345,51 @@ export function WindScene({
 
     const groundTexture = makeGroundTexture(renderer);
     const gravelDepth = (rowCount - 1) * rowSpacingM + tableChordM + 12;
-    const gravelWidth = arrayBounds.width + 14;
+    const gravelCenterZ = 0.8;
+    const gravelMinX = arrayBounds.minX - 7;
+    const wallX = arrayBounds.maxX + 3;
+    const gravelWidth = wallX - gravelMinX;
+    const gravelCenterX = (gravelMinX + wallX) / 2;
+    const wallHeight = 0.86;
+    const wallDepth = gravelDepth + 3;
+    const wallMinZ = gravelCenterZ - wallDepth / 2;
+    const retainedHillWidth = 78;
+    const retainedHillDepth = wallDepth + 62;
+    const retainedHillCenterX = wallX + retainedHillWidth / 2 + 0.12;
+    const retainedHillCenterZ = gravelCenterZ - 10;
+    const retainedHillHeightAt = (x: number, z: number) => {
+      const progress = clamp((x - wallX) / retainedHillWidth, 0, 1);
+      const undulation = progress * (Math.sin(z * 0.16) * 0.13 + Math.sin(x * 0.11 + z * 0.07) * 0.09);
+      return wallHeight + 0.05 + progress * 4.7 + undulation;
+    };
     const ground = new THREE.Mesh(
       new THREE.PlaneGeometry(gravelWidth, gravelDepth, 1, 1),
       new THREE.MeshStandardMaterial({ map: groundTexture, color: 0x5a615d, roughness: 0.99, metalness: 0.01 }),
     );
     ground.rotation.x = -Math.PI / 2;
-    ground.position.set(arrayCenterX, -0.035, 0.8);
+    ground.position.set(gravelCenterX, -0.035, gravelCenterZ);
     ground.receiveShadow = true;
     scene.add(ground);
+
+    const retainedHillGeometry = new THREE.PlaneGeometry(retainedHillWidth, retainedHillDepth, 30, 34);
+    const retainedHillPositions = retainedHillGeometry.attributes.position as THREE.BufferAttribute;
+    for (let index = 0; index < retainedHillPositions.count; index += 1) {
+      const localX = retainedHillPositions.getX(index);
+      const localY = retainedHillPositions.getY(index);
+      const worldX = retainedHillCenterX + localX;
+      const worldZ = retainedHillCenterZ - localY;
+      retainedHillPositions.setZ(index, retainedHillHeightAt(worldX, worldZ));
+    }
+    retainedHillPositions.needsUpdate = true;
+    retainedHillGeometry.computeVertexNormals();
+    const retainedHill = new THREE.Mesh(
+      retainedHillGeometry,
+      new THREE.MeshStandardMaterial({ map: fieldTexture, color: 0x8a814b, roughness: 1 }),
+    );
+    retainedHill.rotation.x = -Math.PI / 2;
+    retainedHill.position.set(retainedHillCenterX, 0, retainedHillCenterZ);
+    retainedHill.receiveShadow = true;
+    scene.add(retainedHill);
 
     const ocean = new THREE.Mesh(
       new THREE.PlaneGeometry(260, 92),
@@ -384,32 +420,29 @@ export function WindScene({
       canopy.scale.set(1.5, 0.62, 1.05);
       canopy.position.y = trunkHeight + 0.25;
       tree.add(trunk, canopy);
-      tree.position.set(
-        arrayCenterX + side * (32 + hash(index + 810) * 63),
-        -0.02,
-        -62 + hash(index + 850) * 96,
-      );
+      const treeX = arrayCenterX + side * (32 + hash(index + 810) * 63);
+      const treeZ = -62 + hash(index + 850) * 96;
+      const treeY = treeX > wallX ? retainedHillHeightAt(treeX, treeZ) : -0.02;
+      tree.position.set(treeX, treeY, treeZ);
       scene.add(tree);
     }
 
     const frontRowHorizontalDepth = Math.cos(tilt) * (
       geometry.rows[0].panelsDeep * panelSlopeM + (geometry.rows[0].panelsDeep - 1) * panelGapM
     );
-    const wallZ = getRowCenterZ(1, geometry) + frontRowHorizontalDepth / 2 + 3.2;
-    const wallWidth = arrayBounds.width + 9;
-    const rockMaterial = new THREE.MeshStandardMaterial({ color: 0x343632, roughness: 1 });
+    const rockMaterial = new THREE.MeshStandardMaterial({ color: 0x3b352e, roughness: 1 });
     const rockGeometry = new THREE.DodecahedronGeometry(0.42, 0);
-    const rockCount = Math.ceil(wallWidth / 0.52) * 3;
+    const stonesPerLayer = Math.ceil(wallDepth / 0.52);
+    const rockCount = stonesPerLayer * 3;
     const wall = new THREE.InstancedMesh(rockGeometry, rockMaterial, rockCount);
     const stone = new THREE.Object3D();
-    const stonesPerLayer = Math.ceil(wallWidth / 0.52);
     for (let index = 0; index < rockCount; index += 1) {
       const layer = Math.floor(index / stonesPerLayer);
       const column = index % stonesPerLayer;
       stone.position.set(
-        arrayCenterX - wallWidth / 2 + column * (wallWidth / Math.max(1, stonesPerLayer - 1)) + (hash(index + 900) - 0.5) * 0.24,
+        wallX + (hash(index + 900) - 0.5) * 0.52,
         0.18 + layer * 0.29 + hash(index + 930) * 0.08,
-        wallZ + (hash(index + 960) - 0.5) * 0.5,
+        wallMinZ + column * (wallDepth / Math.max(1, stonesPerLayer - 1)) + (hash(index + 960) - 0.5) * 0.24,
       );
       stone.rotation.set(hash(index + 990) * 0.5, hash(index + 1020) * Math.PI, hash(index + 1050) * 0.4);
       stone.scale.set(0.75 + hash(index + 1080) * 0.5, 0.62 + hash(index + 1110) * 0.38, 0.78 + hash(index + 1140) * 0.45);
@@ -421,13 +454,36 @@ export function WindScene({
     scene.add(wall);
 
     const fenceMaterial = new THREE.MeshStandardMaterial({ color: 0x6b7370, metalness: 0.76, roughness: 0.38 });
-    const fenceZ = wallZ + 1.15;
-    for (let index = 0; index <= 18; index += 1) {
-      const x = arrayCenterX - wallWidth / 2 + index * (wallWidth / 18);
-      scene.add(makeBeam(new THREE.Vector3(x, 0, fenceZ), new THREE.Vector3(x, 1.35, fenceZ), 0.025, fenceMaterial));
+    const sideFenceX = wallX + 1.2;
+    const sideFencePosts = 22;
+    const sideFenceBases: Array<{ z: number; y: number }> = [];
+    for (let index = 0; index <= sideFencePosts; index += 1) {
+      const z = wallMinZ + index * (wallDepth / sideFencePosts);
+      const y = retainedHillHeightAt(sideFenceX, z);
+      sideFenceBases.push({ z, y });
+      scene.add(makeBeam(new THREE.Vector3(sideFenceX, y, z), new THREE.Vector3(sideFenceX, y + 1.35, z), 0.025, fenceMaterial));
+    }
+    for (const height of [0.36, 0.78, 1.18]) {
+      for (let index = 0; index < sideFenceBases.length - 1; index += 1) {
+        const start = sideFenceBases[index];
+        const end = sideFenceBases[index + 1];
+        scene.add(makeBeam(
+          new THREE.Vector3(sideFenceX, start.y + height, start.z),
+          new THREE.Vector3(sideFenceX, end.y + height, end.z),
+          0.009,
+          fenceMaterial,
+        ));
+      }
+    }
+
+    const frontFenceZ = gravelCenterZ + gravelDepth / 2 + 0.6;
+    const frontFencePosts = 18;
+    for (let index = 0; index <= frontFencePosts; index += 1) {
+      const x = gravelMinX + index * ((wallX - gravelMinX) / frontFencePosts);
+      scene.add(makeBeam(new THREE.Vector3(x, 0, frontFenceZ), new THREE.Vector3(x, 1.35, frontFenceZ), 0.025, fenceMaterial));
     }
     for (const y of [0.36, 0.78, 1.18]) {
-      scene.add(makeBeam(new THREE.Vector3(arrayCenterX - wallWidth / 2, y, fenceZ), new THREE.Vector3(arrayCenterX + wallWidth / 2, y, fenceZ), 0.009, fenceMaterial));
+      scene.add(makeBeam(new THREE.Vector3(gravelMinX, y, frontFenceZ), new THREE.Vector3(wallX, y, frontFenceZ), 0.009, fenceMaterial));
     }
 
     const arrayGroup = new THREE.Group();
@@ -513,7 +569,7 @@ export function WindScene({
               const folded = !upright && moduleNumber % 7 === 0;
               immediatePosition.x += (hash(moduleNumber + rowNumber * 47) - 0.5) * 3.1;
               immediatePosition.z = getRowCenterZ(1, geometry) + frontRowHorizontalDepth * 0.15 + damageSeed * 7.2;
-              if (moduleNumber % 19 === 0) immediatePosition.z = fenceZ + 1.4 + hash(moduleNumber + 221) * 2.2;
+              if (moduleNumber % 19 === 0) immediatePosition.z = frontFenceZ + 1.4 + hash(moduleNumber + 221) * 2.2;
               immediatePosition.y = upright ? panelSlopeM * 0.47 : folded ? 0.42 : 0.09 + hash(moduleNumber + 271) * 0.06;
               immediateRotation.set(
                 upright ? THREE.MathUtils.degToRad(76 + hash(moduleNumber + 301) * 13) : folded ? THREE.MathUtils.degToRad(28 + hash(moduleNumber + 331) * 24) : THREE.MathUtils.degToRad(hash(moduleNumber + 361) * 5),
