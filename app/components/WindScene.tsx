@@ -855,6 +855,7 @@ export function WindScene({
           bayMaterials[Math.min(post, segmentCount - 1)],
         );
         pole.position.set(x, 1.1, screenGeometry.z);
+        pole.userData.element = Math.min(post, segmentCount - 1) + 1;
         group.add(pole);
         posts.push(pole);
       }
@@ -902,6 +903,7 @@ export function WindScene({
         fin.userData.rowZ = z;
         fin.userData.rowHorizontalDepth = rowHorizontalDepth;
         fin.userData.row = row;
+        fin.userData.element = vane + 1;
         vaneGroup.add(fin);
         vaneVisuals.push(fin);
       }
@@ -1517,28 +1519,36 @@ export function WindScene({
       }
 
       const vibrationScale = live.viewMode === "vibration" && live.playing ? 1 : 0;
-      const deviceLoadRows = new Map(live.result.mitigationLoad?.rows.map((row) => [row.row, row]) ?? []);
+      const deviceLoadElements = new Map(
+        live.result.mitigationLoad?.rows.flatMap((row) =>
+          row.elements.map((element) => [`${row.row}:${element.element}`, element] as const),
+        ) ?? [],
+      );
+      const elementVibration = (row: number, element: number) =>
+        deviceLoadElements.get(`${row}:${element}`)?.vibrationIndex ?? 0;
       for (const screen of screenAssemblies) {
-        const rowLoad = deviceLoadRows.get(screen.row);
-        const amplitude = vibrationScale * (rowLoad?.peakVibrationIndex ?? 0) * 0.00055;
         const screenZ = getScreenGeometry(screen.row, geometry).z;
         screen.slats.forEach((slat, index) => {
+          const amplitude = vibrationScale * elementVibration(screen.row, slat.userData.segment + 1) * 0.00055;
           const phase = screen.row * 0.71 + index * 0.33;
           slat.position.z = screenZ + Math.sin(elapsed * 7.4 + phase) * amplitude;
           slat.rotation.y = Math.cos(elapsed * 6.8 + phase) * amplitude * 0.08;
         });
         screen.posts.forEach((post, index) => {
+          const amplitude = vibrationScale * elementVibration(screen.row, post.userData.element) * 0.00055;
           post.rotation.x = Math.sin(elapsed * 6.3 + screen.row + index * 0.21) * amplitude * 0.04;
         });
       }
       for (const vane of vaneVisuals) {
-        const rowLoad = deviceLoadRows.get(vane.userData.row);
-        const amplitude = vibrationScale * (rowLoad?.peakVibrationIndex ?? 0) * 0.00009;
+        const amplitude = vibrationScale
+          * elementVibration(vane.userData.row, vane.userData.element)
+          * 0.00009;
         vane.rotation.y = Math.sin(elapsed * 9.1 + vane.userData.row * 0.8 + vane.position.x * 0.13) * amplitude;
       }
       for (const spoiler of spoilerVisuals) {
-        const rowLoad = deviceLoadRows.get(spoiler.userData.row);
-        const amplitude = vibrationScale * (rowLoad?.peakVibrationIndex ?? 0) * 0.00008;
+        const amplitude = vibrationScale
+          * elementVibration(spoiler.userData.row, spoiler.userData.element)
+          * 0.00008;
         const baseAngle = THREE.MathUtils.degToRad(
           -live.config.spoilerAngleDeg + (spoiler.userData.angleOffset ?? 0),
         );
@@ -1546,10 +1556,13 @@ export function WindScene({
       }
       const damperBaseScale = 0.86 + live.config.damperDampingPercent * 0.035;
       for (const set of damperSets) {
-        const rowLoad = deviceLoadRows.get(set.row);
-        const pulse = 1 + vibrationScale * (rowLoad?.peakVibrationIndex ?? 0) * 0.00042
-          * Math.sin(elapsed * 11.4 + set.row * 0.63);
-        set.meshes.forEach((damper) => damper.scale.setScalar(damperBaseScale * pulse));
+        set.meshes.forEach((damper) => {
+          const pulse = 1 + vibrationScale
+            * elementVibration(set.row, damper.userData.element)
+            * 0.00042
+            * Math.sin(elapsed * 11.4 + set.row * 0.63 + damper.userData.element * 0.11);
+          damper.scale.setScalar(damperBaseScale * pulse);
+        });
       }
       const selectionPulse = 1 + Math.sin(elapsed * 3.2) * 0.025;
       selectionMarker.scale.setScalar(selectionPulse);

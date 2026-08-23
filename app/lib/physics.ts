@@ -382,6 +382,10 @@ function deviceVibrationIndex(
   return clamp(100 * 0.48 * pressureDemand * turbulenceDemand * resonanceDemand, 0, 100);
 }
 
+function combinedAttachedVibrationIndex(directIndex: number, supportIndex: number) {
+  return clamp(Math.hypot(directIndex, supportIndex), 0, 100);
+}
+
 function summarizeMitigationRows(
   concept: Exclude<MitigationId, "none">,
   elementLabel: string,
@@ -442,6 +446,15 @@ function simulateMitigationLoads(
     rows[row - 1].panels.reduce((current, panel) =>
       Math.abs(panel.xM - xM) < Math.abs(current.xM - xM) ? panel : current,
     );
+  const localSupportVibrationAt = (row: number, xM: number) => {
+    const rowPanels = rows[row - 1].panels;
+    const nearestDistance = Math.min(...rowPanels.map((panel) => Math.abs(panel.xM - xM)));
+    return Math.max(
+      ...rowPanels
+        .filter((panel) => Math.abs(panel.xM - xM) <= nearestDistance + 0.001)
+        .map((panel) => panel.vibrationIndex),
+    );
+  };
   const edgeFactorAt = (xM: number, scaleM: number) => {
     const upwindDistance = flow.x >= 0 ? xM - arrayBounds.minX : arrayBounds.maxX - xM;
     return 1 + 0.18 * Math.abs(flow.x) * Math.exp(-Math.max(0, upwindDistance) / Math.max(0.4, scaleM));
@@ -508,6 +521,12 @@ function simulateMitigationLoads(
         const forceKn = pressureKpa * projectedAreaM2;
         const excitationFrequencyHz = 0.16 * normalSpeed / 0.72;
         const responseGain = harmonicResponseGain(excitationFrequencyHz, 5.5, 1.5);
+        const directVibrationIndex = deviceVibrationIndex(
+          pressureKpa,
+          dynamicPressureKpa,
+          turbulenceRatio,
+          responseGain,
+        );
         elements.push({
           row,
           element: vane + 1,
@@ -518,14 +537,17 @@ function simulateMitigationLoads(
           attachmentLoadKn: forceKn,
           overturningMomentKnM: forceKn * 0.36,
           excitationFrequencyHz,
-          vibrationIndex: deviceVibrationIndex(pressureKpa, dynamicPressureKpa, turbulenceRatio, responseGain),
+          vibrationIndex: combinedAttachedVibrationIndex(
+            directVibrationIndex,
+            localSupportVibrationAt(row, xM),
+          ),
         });
       }
     }
     return summarizeMitigationRows(
       "vanes",
       "vane",
-      "Crosswind drag on each under-panel vane; the value is its total attachment-line demand. Vibration assumes 5.5 Hz and 1.5% damping.",
+      "Crosswind drag on each under-panel vane; the value is its total attachment-line demand. Vibration combines its assumed 5.5 Hz response with local rack motion.",
       elements,
     );
   }
@@ -551,6 +573,12 @@ function simulateMitigationLoads(
         const forceKn = pressureKpa * projectedAreaM2;
         const excitationFrequencyHz = 0.16 * normalSpeed / Math.max(0.08, config.spoilerHeightM);
         const responseGain = harmonicResponseGain(excitationFrequencyHz, 7, 1.5);
+        const directVibrationIndex = deviceVibrationIndex(
+          pressureKpa,
+          dynamicPressureKpa,
+          turbulenceRatio,
+          responseGain,
+        );
         elements.push({
           row,
           element: column + 1,
@@ -561,14 +589,17 @@ function simulateMitigationLoads(
           attachmentLoadKn: forceKn / 2,
           overturningMomentKnM: forceKn * config.spoilerHeightM / 4,
           excitationFrequencyHz,
-          vibrationIndex: deviceVibrationIndex(pressureKpa, dynamicPressureKpa, turbulenceRatio, responseGain),
+          vibrationIndex: combinedAttachedVibrationIndex(
+            directVibrationIndex,
+            localSupportVibrationAt(row, xM),
+          ),
         });
       }
     }
     return summarizeMitigationRows(
       "spoilers",
       "deflector bay",
-      "Drag on each module-width deflector bay; two edge attachments share each bay load. Vibration assumes 7 Hz and 1.5% damping.",
+      "Drag on each module-width deflector bay; two edge attachments share each bay load. Vibration combines its assumed 7 Hz response with local rack motion.",
       elements,
     );
   }

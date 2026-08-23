@@ -204,6 +204,29 @@ test("scales added-hardware demand with wind speed and direction", () => {
   assert.equal(fast.mitigationLoad.rows[0].elementCount, baseConfig.geometry.rows[0].columns);
 });
 
+test("includes local rack motion in attached mitigation vibration", () => {
+  for (const mitigation of ["vanes", "spoilers"]) {
+    const result = simulate({
+      ...baseConfig,
+      mitigation,
+      vaneStartRow: 2,
+      vaneEndRow: 2,
+      spoilerStartRow: 2,
+      spoilerEndRow: 2,
+    });
+    const rowPanels = result.rows[1].panels;
+    const deviceRow = result.mitigationLoad.rows[0];
+    const panelPeak = Math.max(...rowPanels.map((panel) => panel.vibrationIndex));
+    const panelMinimum = Math.min(...rowPanels.map((panel) => panel.vibrationIndex));
+    const devicePeak = Math.max(...deviceRow.elements.map((element) => element.vibrationIndex));
+    const deviceMinimum = Math.min(...deviceRow.elements.map((element) => element.vibrationIndex));
+
+    assert.ok(devicePeak >= panelPeak);
+    assert.ok(deviceMinimum >= panelMinimum);
+    assert.ok(devicePeak - deviceMinimum > 10);
+  }
+});
+
 test("resolves transferred cyclic demand at every fitted damper", () => {
   const dense = simulate({
     ...baseConfig,
