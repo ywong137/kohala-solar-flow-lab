@@ -365,11 +365,14 @@ export function WindScene({
       const undulation = Math.sin(z * 0.16) * 0.07 + Math.sin(x * 0.11 + z * 0.07) * 0.05;
       return wallTopHeightAt(z) + roundedRise + crown + crossProgress * 0.14 + undulation * crossProgress;
     };
-    const siteTerrainHeightAt = (x: number, z: number) => {
+    const lowerTerrainHeightAt = (x: number, z: number) => {
       const leftDrop = Math.max(0, gravelMinX - x) * 0.042;
       const makaiDrop = Math.max(0, z - gravelMaxZ) * 0.055;
       const maukaRise = Math.max(0, gravelMinZ - z) * 0.006;
-      const lowerSlope = -0.08 - leftDrop - makaiDrop + maukaRise;
+      return -0.08 - leftDrop - makaiDrop + maukaRise;
+    };
+    const siteTerrainHeightAt = (x: number, z: number) => {
+      const lowerSlope = lowerTerrainHeightAt(x, z);
       if (x <= wallXAt(z)) return lowerSlope;
 
       const endDistance = z < wallMinZ ? wallMinZ - z : z > wallMaxZ ? z - wallMaxZ : 0;
@@ -385,7 +388,7 @@ export function WindScene({
     for (let index = 0; index < fieldPositions.count; index += 1) {
       const worldX = arrayCenterX + fieldPositions.getX(index);
       const worldZ = fieldCenterZ - fieldPositions.getY(index);
-      fieldPositions.setZ(index, siteTerrainHeightAt(worldX, worldZ));
+      fieldPositions.setZ(index, lowerTerrainHeightAt(worldX, worldZ));
     }
     fieldPositions.needsUpdate = true;
     fieldGeometry.computeVertexNormals();
@@ -398,21 +401,50 @@ export function WindScene({
     field.receiveShadow = true;
     scene.add(field);
 
-    const gravelSegments = 42;
+    const gravelSegments = 64;
     const gravelPositions: number[] = [];
     const gravelUvs: number[] = [];
     const gravelIndices: number[] = [];
+    const rowLeftEdges = geometry.rows.map((_, index) =>
+      getRowOffsetX(index + 1, geometry) - getRowWidth(index + 1, geometry) / 2,
+    );
+    const gravelLeftControls = [
+      { z: gravelMinZ, x: rowLeftEdges[rowCount - 1] - 3.8 },
+      ...geometry.rows.map((_, index) => ({
+        z: getRowCenterZ(index + 1, geometry),
+        x: rowLeftEdges[index] - 4.2,
+      })),
+      { z: gravelMaxZ, x: rowLeftEdges[0] - 3.8 },
+    ].sort((a, b) => a.z - b.z);
+    const gravelLeftXAt = (z: number) => {
+      const upperIndex = gravelLeftControls.findIndex((point) => point.z >= z);
+      if (upperIndex <= 0) return gravelLeftControls[0].x;
+      if (upperIndex < 0) return gravelLeftControls[gravelLeftControls.length - 1].x;
+      const lower = gravelLeftControls[upperIndex - 1];
+      const upper = gravelLeftControls[upperIndex];
+      const progress = (z - lower.z) / Math.max(0.001, upper.z - lower.z);
+      return THREE.MathUtils.lerp(lower.x, upper.x, progress);
+    };
+    const gravelOutline: THREE.Vector2[] = [];
     for (let segment = 0; segment <= gravelSegments; segment += 1) {
-      const progress = segment / gravelSegments;
-      const z = gravelMinZ + progress * gravelDepth;
-      const rightX = wallXAt(z);
-      gravelPositions.push(gravelMinX, -0.035, z, rightX, -0.035, z);
-      gravelUvs.push(0, progress, 1, progress);
-      if (segment < gravelSegments) {
-        const start = segment * 2;
-        gravelIndices.push(start, start + 2, start + 1, start + 1, start + 2, start + 3);
-      }
+      const z = gravelMinZ + (segment / gravelSegments) * gravelDepth;
+      gravelOutline.push(new THREE.Vector2(gravelLeftXAt(z), z));
     }
+    for (let segment = gravelSegments; segment >= 0; segment -= 1) {
+      const z = gravelMinZ + (segment / gravelSegments) * gravelDepth;
+      gravelOutline.push(new THREE.Vector2(wallXAt(z) + 0.75, z));
+    }
+    const gravelFaces = THREE.ShapeUtils.triangulateShape(gravelOutline, []);
+    const gravelBoundsMinX = Math.min(...gravelOutline.map((point) => point.x));
+    const gravelBoundsMaxX = Math.max(...gravelOutline.map((point) => point.x));
+    gravelOutline.forEach((point) => {
+      gravelPositions.push(point.x, -0.025, point.y);
+      gravelUvs.push(
+        (point.x - gravelBoundsMinX) / Math.max(0.001, gravelBoundsMaxX - gravelBoundsMinX),
+        (point.y - gravelMinZ) / gravelDepth,
+      );
+    });
+    gravelFaces.forEach((face) => gravelIndices.push(face[0], face[1], face[2]));
     const gravelGeometry = new THREE.BufferGeometry();
     gravelGeometry.setAttribute("position", new THREE.Float32BufferAttribute(gravelPositions, 3));
     gravelGeometry.setAttribute("uv", new THREE.Float32BufferAttribute(gravelUvs, 2));
@@ -435,18 +467,22 @@ export function WindScene({
     const hillApronPositions: number[] = [];
     const hillApronUvs: number[] = [];
     const hillApronIndices: number[] = [];
-    for (let segment = 0; segment <= gravelSegments; segment += 1) {
-      const progress = segment / gravelSegments;
-      const z = wallMinZ + progress * wallDepth;
-      const edgeX = wallXAt(z);
-      hillApronPositions.push(
-        edgeX + 0.12, wallTopHeightAt(z) + 0.015, z,
-        edgeX + 3.2, retainedHillHeightAt(edgeX + 3.2, z) + 0.015, z,
-      );
-      hillApronUvs.push(0, progress, 1, progress);
-      if (segment < gravelSegments) {
-        const start = segment * 2;
-        hillApronIndices.push(start, start + 1, start + 2, start + 1, start + 3, start + 2);
+    const hillCrossSegments = 28;
+    const hillDepthSegments = 48;
+    for (let depthSegment = 0; depthSegment <= hillDepthSegments; depthSegment += 1) {
+      const depthProgress = depthSegment / hillDepthSegments;
+      const z = wallMinZ + depthProgress * wallDepth;
+      const edgeX = wallXAt(z) + 0.12;
+      for (let crossSegment = 0; crossSegment <= hillCrossSegments; crossSegment += 1) {
+        const crossProgress = crossSegment / hillCrossSegments;
+        const x = edgeX + crossProgress * retainedHillWidth;
+        hillApronPositions.push(x, retainedHillHeightAt(x, z) + 0.015, z);
+        hillApronUvs.push(crossProgress, depthProgress);
+        if (depthSegment < hillDepthSegments && crossSegment < hillCrossSegments) {
+          const start = depthSegment * (hillCrossSegments + 1) + crossSegment;
+          const nextRow = start + hillCrossSegments + 1;
+          hillApronIndices.push(start, start + 1, nextRow, start + 1, nextRow + 1, nextRow);
+        }
       }
     }
     const hillApronGeometry = new THREE.BufferGeometry();
