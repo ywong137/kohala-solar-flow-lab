@@ -16,7 +16,13 @@ import {
   getRowWidth,
   getScreenFlowEffects,
   getScreenGeometry,
+  getLowerTerrainHeight,
   rowIsInRange,
+  getRetainingWallTopHeight,
+  getSiteFlowEffects,
+  getSiteTerrainHeight,
+  getSiteTerrainLayout,
+  resolveSiteFlowBoundary,
   type MitigationId,
   type SimulationConfig,
   type SimulationResult,
@@ -406,45 +412,22 @@ export function WindScene({
 
     const groundTexture = makeGroundTexture(renderer);
     const fieldTexture = makeFieldTexture(renderer);
-    const gravelDepth = (rowCount - 1) * rowSpacingM + tableChordM + 12;
-    const gravelCenterZ = 0.8;
-    const gravelMinX = arrayBounds.minX - 7;
-    const gravelMinZ = gravelCenterZ - gravelDepth / 2;
-    const gravelMaxZ = gravelCenterZ + gravelDepth / 2;
-    const wallDepth = gravelDepth + 3;
-    const wallMinZ = gravelCenterZ - wallDepth / 2;
-    const wallMaxZ = gravelCenterZ + wallDepth / 2;
+    const terrainLayout = getSiteTerrainLayout(geometry);
+    const {
+      gravelDepth,
+      gravelCenterZ,
+      gravelMinX,
+      gravelMinZ,
+      gravelMaxZ,
+      wallDepth,
+      wallMinZ,
+      wallMaxZ,
+      retainedHillWidth,
+    } = terrainLayout;
     const wallXAt = (z: number) => getRetainingWallX(z, geometry);
-    const retainedHillWidth = 84;
-    const wallProgressAt = (z: number) => clamp((z - wallMinZ) / wallDepth, 0, 1);
-    const wallTopHeightAt = (z: number) => {
-      const arch = Math.sin(wallProgressAt(z) * Math.PI);
-      return 0.63 + Math.pow(Math.max(0, arch), 0.72) * 1.62;
-    };
-    const retainedHillHeightAt = (x: number, z: number) => {
-      const localWallX = wallXAt(z);
-      const crossProgress = clamp((x - localWallX) / retainedHillWidth, 0, 1);
-      const rearProgress = clamp((wallMaxZ - z) / wallDepth, 0, 1);
-      const smoothCrossRise = crossProgress * crossProgress * (3 - 2 * crossProgress);
-      const roundedRise = smoothCrossRise * (1.25 + rearProgress * 0.48);
-      const crown = Math.sin(rearProgress * Math.PI) * 0.18;
-      const undulation = Math.sin(z * 0.16) * 0.07 + Math.sin(x * 0.11 + z * 0.07) * 0.05;
-      return wallTopHeightAt(z) + roundedRise + crown + crossProgress * 0.14 + undulation * crossProgress;
-    };
-    const lowerTerrainHeightAt = (x: number, z: number) => {
-      const leftDrop = Math.max(0, gravelMinX - x) * 0.042;
-      const makaiDrop = Math.max(0, z - gravelMaxZ) * 0.055;
-      const maukaRise = Math.max(0, gravelMinZ - z) * 0.006;
-      return -0.08 - leftDrop - makaiDrop + maukaRise;
-    };
-    const siteTerrainHeightAt = (x: number, z: number) => {
-      const lowerSlope = lowerTerrainHeightAt(x, z);
-      if (x <= wallXAt(z)) return lowerSlope;
-
-      const endDistance = z < wallMinZ ? wallMinZ - z : z > wallMaxZ ? z - wallMaxZ : 0;
-      const wallInfluence = Math.exp(-Math.pow(endDistance / 15, 2));
-      return THREE.MathUtils.lerp(lowerSlope, retainedHillHeightAt(x, z), wallInfluence);
-    };
+    const wallTopHeightAt = (z: number) => getRetainingWallTopHeight(z, geometry);
+    const lowerTerrainHeightAt = (x: number, z: number) => getLowerTerrainHeight(x, z, geometry);
+    const siteTerrainHeightAt = (x: number, z: number) => getSiteTerrainHeight(x, z, geometry);
 
     const fieldWidth = 240;
     const fieldDepth = 155;
@@ -1097,9 +1080,11 @@ export function WindScene({
         : layer < 0.8
           ? 0.9 + Math.random() * 1.75
           : 2.7 + Math.random() * 3.7;
-      particlePositions[index * 3] = flowX * upstream + transverseX * spread;
-      particlePositions[index * 3 + 1] = height;
-      particlePositions[index * 3 + 2] = flowZ * upstream + transverseZ * spread;
+      const x = flowX * upstream + transverseX * spread;
+      const z = flowZ * upstream + transverseZ * spread;
+      particlePositions[index * 3] = x;
+      particlePositions[index * 3 + 1] = Math.max(height, siteTerrainHeightAt(x, z) + 0.12);
+      particlePositions[index * 3 + 2] = z;
       particleTurbulence[index * 2] = 0;
       particleTurbulence[index * 2 + 1] = 0;
     };
@@ -1129,6 +1114,11 @@ export function WindScene({
       let verticalVelocity = 0;
       let lateralVelocity = 0;
       let turbulence = (live.config.ambientTurbulence / 100) * 0.55;
+      const siteFlowEffects = getSiteFlowEffects(x, y, z, { x: flowX, z: flowZ }, geometry);
+      speedFactor *= siteFlowEffects.speedFactor;
+      verticalVelocity += siteFlowEffects.verticalVelocityRatio * visualSpeed;
+      lateralVelocity += siteFlowEffects.lateralVelocityRatio * visualSpeed;
+      turbulence += siteFlowEffects.turbulenceAdd;
 
       for (const row of rowFlowGeometry) {
         if (live.arrayState !== "restored" && row.row <= 2) continue;
@@ -1194,8 +1184,9 @@ export function WindScene({
         }
       }
 
-      if (y < 0.24) {
-        verticalVelocity += (1 - y / 0.24) * visualSpeed * 0.28;
+      const terrainClearance = y - siteFlowEffects.groundHeightM;
+      if (terrainClearance < 0.28) {
+        verticalVelocity += (1 - terrainClearance / 0.28) * visualSpeed * 0.42;
       }
 
       const localTurbulence = clamp(turbulence * screenEffects.turbulenceFactor, 0.018, 0.46);
@@ -1433,10 +1424,10 @@ export function WindScene({
 
           const transverseX = -normalizedFlowZ;
           const transverseZ = normalizedFlowX;
-          const newX =
+          let newX =
             oldX +
             (particleFlowSample.vx + transverseX * particleTurbulence[turbulenceOffset]) * delta;
-          const newZ =
+          let newZ =
             oldZ +
             (particleFlowSample.vz + transverseZ * particleTurbulence[turbulenceOffset]) * delta;
           let newY =
@@ -1457,16 +1448,38 @@ export function WindScene({
             }
           }
 
+          const siteBoundary = resolveSiteFlowBoundary(
+            { x: oldX, y: oldY, z: oldZ },
+            { x: newX, y: newY, z: newZ },
+            geometry,
+            0.1,
+          );
+          newX = siteBoundary.x;
+          newY = siteBoundary.y;
+          newZ = siteBoundary.z;
+          if (siteBoundary.hitTerrain) {
+            particleTurbulence[turbulenceOffset + 1] = Math.abs(
+              particleTurbulence[turbulenceOffset + 1],
+            ) * 0.22;
+          }
+          if (siteBoundary.clearedWall) {
+            particleTurbulence[turbulenceOffset] *= 0.35;
+            particleTurbulence[turbulenceOffset + 1] = Math.max(
+              0.18 * Math.max(visualSpeed, 0.1),
+              Math.abs(particleTurbulence[turbulenceOffset + 1]),
+            );
+          }
+
           particlePositions[offset] = newX;
-          particlePositions[offset + 1] = Math.max(0.1, newY);
+          particlePositions[offset + 1] = newY;
           particlePositions[offset + 2] = newZ;
           const streamwisePosition = newX * normalizedFlowX + newZ * normalizedFlowZ;
           const transversePosition = newX * transverseX + newZ * transverseZ;
           if (
             streamwisePosition > 42 ||
             Math.abs(transversePosition) > 42 ||
-            particlePositions[offset + 1] < 0.095 ||
-            particlePositions[offset + 1] > 8.5
+            particlePositions[offset + 1] < siteTerrainHeightAt(newX, newZ) + 0.095 ||
+            particlePositions[offset + 1] > 9.5
           ) {
             resetParticle(index, normalizedFlowX, normalizedFlowZ);
           }
@@ -1487,6 +1500,7 @@ export function WindScene({
         let traceY = line.userData.height;
         let traceZ = normalizedFlowZ * -39 + transverseZ * line.userData.offset;
         for (let point = 0; point < 52; point += 1) {
+          traceY = Math.max(traceY, siteTerrainHeightAt(traceX, traceZ) + 0.12);
           positions[point * 3] = traceX;
           positions[point * 3 + 1] = traceY;
           positions[point * 3 + 2] = traceZ;
@@ -1507,13 +1521,22 @@ export function WindScene({
             Math.hypot(streamlineFlowSample.vx, streamlineFlowSample.vz),
           );
           const stepLength = 1.5;
-          traceX += (streamlineFlowSample.vx / horizontalSpeed) * stepLength;
-          traceZ += (streamlineFlowSample.vz / horizontalSpeed) * stepLength;
-          traceY = clamp(
+          const nextX = traceX + (streamlineFlowSample.vx / horizontalSpeed) * stepLength;
+          const nextZ = traceZ + (streamlineFlowSample.vz / horizontalSpeed) * stepLength;
+          const nextY = clamp(
             traceY + (streamlineFlowSample.vy / horizontalSpeed) * stepLength,
             0.12,
-            7.5,
+            9.5,
           );
+          const siteBoundary = resolveSiteFlowBoundary(
+            { x: traceX, y: traceY, z: traceZ },
+            { x: nextX, y: nextY, z: nextZ },
+            geometry,
+            0.12,
+          );
+          traceX = siteBoundary.x;
+          traceY = siteBoundary.y;
+          traceZ = siteBoundary.z;
         }
         attribute.needsUpdate = true;
       }

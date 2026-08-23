@@ -58,7 +58,11 @@ export type SoutheastEdgeLine = {
   bearingDeg: number;
 };
 
+const southeastEdgeCache = new WeakMap<ArrayGeometryConfig, SoutheastEdgeLine>();
+
 export function getSoutheastEdgeLine(geometry = DEFAULT_ARRAY_CONFIG): SoutheastEdgeLine {
+  const cached = southeastEdgeCache.get(geometry);
+  if (cached) return cached;
   const samples = geometry.rows.map((_, index) => {
     const row = index + 1;
     return {
@@ -81,7 +85,9 @@ export function getSoutheastEdgeLine(geometry = DEFAULT_ARRAY_CONFIG): Southeast
   const directionalBearing = (Math.atan2(east, north) / RAD + 360) % 360;
   const bearingDeg = directionalBearing >= 180 ? directionalBearing - 180 : directionalBearing;
 
-  return { slopeXPerZM, interceptXM, bearingDeg };
+  const edge = { slopeXPerZM, interceptXM, bearingDeg };
+  southeastEdgeCache.set(geometry, edge);
+  return edge;
 }
 
 export function getRetainingWallX(
@@ -102,6 +108,228 @@ export function getRetainingWallClearance(
   const edge = getSoutheastEdgeLine(geometry);
   const wallIntercept = getRetainingWallX(0, geometry);
   return Math.abs(x - edge.slopeXPerZM * z - wallIntercept) / Math.hypot(1, edge.slopeXPerZM);
+}
+
+export type SiteTerrainLayout = {
+  gravelDepth: number;
+  gravelCenterZ: number;
+  gravelMinX: number;
+  gravelMinZ: number;
+  gravelMaxZ: number;
+  wallDepth: number;
+  wallMinZ: number;
+  wallMaxZ: number;
+  retainedHillWidth: number;
+};
+
+const siteTerrainLayoutCache = new WeakMap<ArrayGeometryConfig, SiteTerrainLayout>();
+
+export function getSiteTerrainLayout(geometry = DEFAULT_ARRAY_CONFIG): SiteTerrainLayout {
+  const cached = siteTerrainLayoutCache.get(geometry);
+  if (cached) return cached;
+  const metrics = getArrayMetrics(geometry);
+  const arrayBounds = getArrayBounds(geometry);
+  const gravelDepth = (geometry.rows.length - 1) * geometry.rowSpacingM + metrics.tableChordM + 12;
+  const gravelCenterZ = 0.8;
+  const gravelMinZ = gravelCenterZ - gravelDepth / 2;
+  const gravelMaxZ = gravelCenterZ + gravelDepth / 2;
+  const wallDepth = gravelDepth + 3;
+  const layout = {
+    gravelDepth,
+    gravelCenterZ,
+    gravelMinX: arrayBounds.minX - 7,
+    gravelMinZ,
+    gravelMaxZ,
+    wallDepth,
+    wallMinZ: gravelCenterZ - wallDepth / 2,
+    wallMaxZ: gravelCenterZ + wallDepth / 2,
+    retainedHillWidth: 84,
+  };
+  siteTerrainLayoutCache.set(geometry, layout);
+  return layout;
+}
+
+export function getRetainingWallTopHeight(z: number, geometry = DEFAULT_ARRAY_CONFIG) {
+  const layout = getSiteTerrainLayout(geometry);
+  const progress = clamp((z - layout.wallMinZ) / layout.wallDepth, 0, 1);
+  const arch = Math.sin(progress * Math.PI);
+  return 0.63 + Math.pow(Math.max(0, arch), 0.72) * 1.62;
+}
+
+export function getLowerTerrainHeight(x: number, z: number, geometry = DEFAULT_ARRAY_CONFIG) {
+  const layout = getSiteTerrainLayout(geometry);
+  const leftDrop = Math.max(0, layout.gravelMinX - x) * 0.042;
+  const makaiDrop = Math.max(0, z - layout.gravelMaxZ) * 0.055;
+  const maukaRise = Math.max(0, layout.gravelMinZ - z) * 0.006;
+  return -0.08 - leftDrop - makaiDrop + maukaRise;
+}
+
+export function getRetainedHillHeight(x: number, z: number, geometry = DEFAULT_ARRAY_CONFIG) {
+  const layout = getSiteTerrainLayout(geometry);
+  const wallX = getRetainingWallX(z, geometry);
+  const crossProgress = clamp((x - wallX) / layout.retainedHillWidth, 0, 1);
+  const rearProgress = clamp((layout.wallMaxZ - z) / layout.wallDepth, 0, 1);
+  const smoothCrossRise = crossProgress * crossProgress * (3 - 2 * crossProgress);
+  const roundedRise = smoothCrossRise * (1.25 + rearProgress * 0.48);
+  const crown = Math.sin(rearProgress * Math.PI) * 0.18;
+  const undulation = Math.sin(z * 0.16) * 0.07 + Math.sin(x * 0.11 + z * 0.07) * 0.05;
+  return getRetainingWallTopHeight(z, geometry)
+    + roundedRise
+    + crown
+    + crossProgress * 0.14
+    + undulation * crossProgress;
+}
+
+export function getSiteTerrainHeight(x: number, z: number, geometry = DEFAULT_ARRAY_CONFIG) {
+  const layout = getSiteTerrainLayout(geometry);
+  const lowerSlope = getLowerTerrainHeight(x, z, geometry);
+  if (x <= getRetainingWallX(z, geometry)) return lowerSlope;
+
+  const endDistance = z < layout.wallMinZ
+    ? layout.wallMinZ - z
+    : z > layout.wallMaxZ
+      ? z - layout.wallMaxZ
+      : 0;
+  const wallInfluence = Math.exp(-Math.pow(endDistance / 15, 2));
+  return lowerSlope + (getRetainedHillHeight(x, z, geometry) - lowerSlope) * wallInfluence;
+}
+
+export function getRetainingWallSignedDistance(x: number, z: number, geometry = DEFAULT_ARRAY_CONFIG) {
+  const edge = getSoutheastEdgeLine(geometry);
+  const wallIntercept = getRetainingWallX(0, geometry);
+  return (x - edge.slopeXPerZM * z - wallIntercept) / Math.hypot(1, edge.slopeXPerZM);
+}
+
+export type SiteFlowEffects = {
+  groundHeightM: number;
+  speedFactor: number;
+  turbulenceAdd: number;
+  verticalVelocityRatio: number;
+  lateralVelocityRatio: number;
+  wallWakeFactor: number;
+};
+
+export function getSiteFlowEffects(
+  x: number,
+  y: number,
+  z: number,
+  flow: { x: number; z: number },
+  geometry = DEFAULT_ARRAY_CONFIG,
+): SiteFlowEffects {
+  const groundHeightM = getSiteTerrainHeight(x, z, geometry);
+  const sampleDistance = 0.3;
+  const slopeX = (
+    getSiteTerrainHeight(x + sampleDistance, z, geometry)
+    - getSiteTerrainHeight(x - sampleDistance, z, geometry)
+  ) / (sampleDistance * 2);
+  const slopeZ = (
+    getSiteTerrainHeight(x, z + sampleDistance, geometry)
+    - getSiteTerrainHeight(x, z - sampleDistance, geometry)
+  ) / (sampleDistance * 2);
+  const clearance = Math.max(0.04, y - groundHeightM);
+  const slopeAlongFlow = slopeX * flow.x + slopeZ * flow.z;
+  const terrainInfluence = Math.exp(-clearance / (1.6 + Math.hypot(slopeX, slopeZ) * 4));
+  let speedFactor = 1 + Math.min(0.12, Math.abs(slopeAlongFlow) * 0.16) * terrainInfluence;
+  let turbulenceAdd = Math.min(0.08, Math.hypot(slopeX, slopeZ) * 0.07) * terrainInfluence;
+  let verticalVelocityRatio = clamp(slopeAlongFlow, -0.72, 0.72) * terrainInfluence;
+  let lateralVelocityRatio = 0;
+  let wallWakeFactor = 0;
+
+  const layout = getSiteTerrainLayout(geometry);
+  const edge = getSoutheastEdgeLine(geometry);
+  const wallNormalScale = Math.hypot(1, edge.slopeXPerZM);
+  const wallNormalX = 1 / wallNormalScale;
+  const wallNormalZ = -edge.slopeXPerZM / wallNormalScale;
+  const wallTangentX = edge.slopeXPerZM / wallNormalScale;
+  const wallTangentZ = 1 / wallNormalScale;
+  const flowNormal = flow.x * wallNormalX + flow.z * wallNormalZ;
+  const normalAlignment = Math.abs(flowNormal);
+  const endDistance = z < layout.wallMinZ
+    ? layout.wallMinZ - z
+    : z > layout.wallMaxZ
+      ? z - layout.wallMaxZ
+      : 0;
+  const wallHeight = getRetainingWallTopHeight(z, geometry);
+  const endFactor = Math.exp(-Math.pow(endDistance / Math.max(1.2, wallHeight * 2.4), 2));
+
+  if (normalAlignment > 0.025 && endFactor > 0.01) {
+    const signedDistance = getRetainingWallSignedDistance(x, z, geometry);
+    const directedDistance = signedDistance * Math.sign(flowNormal);
+    const heightInfluence = Math.exp(-Math.pow(
+      Math.max(0, y - wallHeight * 0.55) / Math.max(0.35, wallHeight * 1.05),
+      2,
+    ));
+    if (directedDistance < 0) {
+      const approach = Math.exp(-Math.abs(directedDistance) / Math.max(0.6, wallHeight * 2.6));
+      const strength = normalAlignment * endFactor * heightInfluence * approach;
+      speedFactor *= 1 - 0.3 * strength;
+      turbulenceAdd += 0.035 * strength;
+      verticalVelocityRatio += 0.62 * strength;
+      const nearestEndDirection = z < (layout.wallMinZ + layout.wallMaxZ) / 2 ? -1 : 1;
+      const transverseX = -flow.z;
+      const transverseZ = flow.x;
+      lateralVelocityRatio += nearestEndDirection
+        * (wallTangentX * transverseX + wallTangentZ * transverseZ)
+        * 0.1
+        * strength;
+    } else {
+      const wakeDecay = Math.exp(-directedDistance / Math.max(0.8, wallHeight * 7));
+      const wakeStrength = normalAlignment * endFactor * heightInfluence * wakeDecay;
+      wallWakeFactor = clamp(wakeStrength, 0, 1);
+      speedFactor *= 1 - 0.42 * wakeStrength;
+      turbulenceAdd += 0.2 * wakeStrength;
+      verticalVelocityRatio += normalAlignment * endFactor * heightInfluence * (
+        0.16 * Math.exp(-directedDistance / Math.max(0.4, wallHeight * 1.8))
+        - 0.06 * (directedDistance / Math.max(0.4, wallHeight * 4))
+          * Math.exp(-directedDistance / Math.max(0.4, wallHeight * 4))
+      );
+    }
+  }
+
+  return {
+    groundHeightM,
+    speedFactor: clamp(speedFactor, 0.46, 1.18),
+    turbulenceAdd: clamp(turbulenceAdd, 0, 0.24),
+    verticalVelocityRatio: clamp(verticalVelocityRatio, -0.75, 0.9),
+    lateralVelocityRatio: clamp(lateralVelocityRatio, -0.2, 0.2),
+    wallWakeFactor,
+  };
+}
+
+export type SiteBoundaryResolution = {
+  x: number;
+  y: number;
+  z: number;
+  hitTerrain: boolean;
+  clearedWall: boolean;
+};
+
+export function resolveSiteFlowBoundary(
+  oldPosition: { x: number; y: number; z: number },
+  newPosition: { x: number; y: number; z: number },
+  geometry = DEFAULT_ARRAY_CONFIG,
+  clearanceM = 0.1,
+): SiteBoundaryResolution {
+  const terrainFloor = getSiteTerrainHeight(newPosition.x, newPosition.z, geometry) + clearanceM;
+  let y = Math.max(newPosition.y, terrainFloor);
+  const hitTerrain = newPosition.y < terrainFloor;
+  let clearedWall = false;
+  const oldDistance = getRetainingWallSignedDistance(oldPosition.x, oldPosition.z, geometry);
+  const newDistance = getRetainingWallSignedDistance(newPosition.x, newPosition.z, geometry);
+  if (oldDistance * newDistance <= 0 && Math.abs(oldDistance - newDistance) > 0.0001) {
+    const crossingRatio = Math.abs(oldDistance) / (Math.abs(oldDistance) + Math.abs(newDistance));
+    const crossingZ = oldPosition.z + (newPosition.z - oldPosition.z) * crossingRatio;
+    const crossingY = oldPosition.y + (newPosition.y - oldPosition.y) * crossingRatio;
+    const layout = getSiteTerrainLayout(geometry);
+    if (crossingZ >= layout.wallMinZ && crossingZ <= layout.wallMaxZ) {
+      const wallClearance = getRetainingWallTopHeight(crossingZ, geometry) + clearanceM;
+      if (crossingY < wallClearance) {
+        y = Math.max(y, wallClearance);
+        clearedWall = true;
+      }
+    }
+  }
+  return { x: newPosition.x, y, z: newPosition.z, hitTerrain, clearedWall };
 }
 
 export type ViewMode = "flow" | "pressure" | "vibration";
@@ -460,6 +688,13 @@ function simulateMitigationLoads(
     return 1 + 0.18 * Math.abs(flow.x) * Math.exp(-Math.max(0, upwindDistance) / Math.max(0.4, scaleM));
   };
   const gustFactorAt = (turbulenceRatio: number) => clamp(1 + 2.7 * turbulenceRatio, 1.08, 2.05);
+  const localFlowAt = (xM: number, yM: number, zM: number) => {
+    const effects = getSiteFlowEffects(xM, yM, zM, flow, geometry);
+    return {
+      effects,
+      dynamicPressureKpa: dynamicPressureKpa * effects.speedFactor ** 2,
+    };
+  };
 
   if (config.mitigation === "screen") {
     const porosityRatio = clamp(config.screenPorosity / 100, 0.2, 0.8);
@@ -474,8 +709,12 @@ function simulateMitigationLoads(
       for (let segment = 0; segment < segmentCount; segment += 1) {
         const xM = screen.x - screen.width / 2 + (segment + 0.5) * segmentWidth;
         const localPanel = localPanelAt(row, xM);
-        const turbulenceRatio = Math.max(config.ambientTurbulence / 100, localPanel.turbulencePercent / 100);
-        const pressureKpa = dynamicPressureKpa * normalPressureFactor * dragCoefficient
+        const localFlow = localFlowAt(xM, config.screenHeightM / 2, screen.z);
+        const turbulenceRatio = Math.max(
+          config.ambientTurbulence / 100 + localFlow.effects.turbulenceAdd,
+          localPanel.turbulencePercent / 100,
+        );
+        const pressureKpa = localFlow.dynamicPressureKpa * normalPressureFactor * dragCoefficient
           * gustFactorAt(turbulenceRatio) * edgeFactorAt(xM, config.screenHeightM * 2);
         const projectedAreaM2 = segmentWidth * config.screenHeightM;
         const forceKn = pressureKpa * projectedAreaM2;
@@ -491,7 +730,12 @@ function simulateMitigationLoads(
           attachmentLoadKn: forceKn / 2,
           overturningMomentKnM: forceKn * config.screenHeightM / 4,
           excitationFrequencyHz,
-          vibrationIndex: deviceVibrationIndex(pressureKpa, dynamicPressureKpa, turbulenceRatio, responseGain),
+          vibrationIndex: deviceVibrationIndex(
+            pressureKpa,
+            localFlow.dynamicPressureKpa,
+            turbulenceRatio,
+            responseGain,
+          ),
         });
       }
     }
@@ -514,8 +758,10 @@ function simulateMitigationLoads(
       for (let vane = 0; vane < vaneCount; vane += 1) {
         const xM = rowOffsetX - rowWidth / 2 + 0.45 + vane * ((rowWidth - 0.9) / Math.max(1, vaneCount - 1));
         const localPanel = localPanelAt(row, xM);
+        const rowZ = getRowCenterZ(row, geometry);
+        const localFlow = localFlowAt(xM, 0.43, rowZ);
         const turbulenceRatio = localPanel.turbulencePercent / 100;
-        const pressureKpa = dynamicPressureKpa * normalPressureFactor * 1.15
+        const pressureKpa = localFlow.dynamicPressureKpa * normalPressureFactor * 1.15
           * gustFactorAt(turbulenceRatio) * edgeFactorAt(xM, config.vaneLengthM);
         const projectedAreaM2 = 0.72 * config.vaneLengthM;
         const forceKn = pressureKpa * projectedAreaM2;
@@ -523,7 +769,7 @@ function simulateMitigationLoads(
         const responseGain = harmonicResponseGain(excitationFrequencyHz, 5.5, 1.5);
         const directVibrationIndex = deviceVibrationIndex(
           pressureKpa,
-          dynamicPressureKpa,
+          localFlow.dynamicPressureKpa,
           turbulenceRatio,
           responseGain,
         );
@@ -566,8 +812,14 @@ function simulateMitigationLoads(
       for (let column = 0; column < rowConfig.columns; column += 1) {
         const xM = rowOffsetX + (column - (rowConfig.columns - 1) / 2) * metrics.modulePitchM;
         const localPanel = localPanelAt(row, xM);
+        const rowZ = getRowCenterZ(row, geometry);
+        const localFlow = localFlowAt(
+          xM,
+          geometry.lowEdgeClearanceM + config.spoilerHeightM / 2,
+          rowZ,
+        );
         const turbulenceRatio = localPanel.turbulencePercent / 100;
-        const pressureKpa = dynamicPressureKpa * normalPressureFactor * dragCoefficient
+        const pressureKpa = localFlow.dynamicPressureKpa * normalPressureFactor * dragCoefficient
           * gustFactorAt(turbulenceRatio) * edgeFactorAt(xM, config.spoilerHeightM * 5);
         const projectedAreaM2 = metrics.modulePitchM * config.spoilerHeightM * styleSolidity;
         const forceKn = pressureKpa * projectedAreaM2;
@@ -575,7 +827,7 @@ function simulateMitigationLoads(
         const responseGain = harmonicResponseGain(excitationFrequencyHz, 7, 1.5);
         const directVibrationIndex = deviceVibrationIndex(
           pressureKpa,
-          dynamicPressureKpa,
+          localFlow.dynamicPressureKpa,
           turbulenceRatio,
           responseGain,
         );
@@ -643,6 +895,8 @@ export function simulate(config: SimulationConfig): SimulationResult {
   const geometry = config.geometry;
   const metrics = getArrayMetrics(geometry);
   const modulePitchM = metrics.modulePitchM;
+  const panelCenterHeightM = geometry.lowEdgeClearanceM
+    + Math.sin(geometry.tiltDeg * RAD) * metrics.tableChordM / 2;
   const speedMs = config.windSpeedMph * 0.44704;
   const dynamicPressureKpa = (0.5 * 1.17 * speedMs * speedMs) / 1000;
   const flow = getFlowComponents(config.windBearing, geometry);
@@ -658,7 +912,17 @@ export function simulate(config: SimulationConfig): SimulationResult {
       const xM = getRowOffsetX(row, geometry) + (columnIndex - (rowConfig.columns - 1) / 2) * modulePitchM;
       const zM = getRowCenterZ(row, geometry);
       const screenEffects = getScreenFlowEffects(config, xM, zM, flow);
-      return { row, column: columnIndex + 1, xM, zM, wakeFactor: rowEffects.wakeSourceFactor * screenEffects.turbulenceFactor * screenEffects.speedFactor };
+      const siteFlowEffects = getSiteFlowEffects(xM, panelCenterHeightM, zM, flow, geometry);
+      return {
+        row,
+        column: columnIndex + 1,
+        xM,
+        zM,
+        wakeFactor: rowEffects.wakeSourceFactor
+          * screenEffects.turbulenceFactor
+          * screenEffects.speedFactor
+          * siteFlowEffects.speedFactor,
+      };
     });
   });
 
@@ -695,7 +959,20 @@ export function simulate(config: SimulationConfig): SimulationResult {
       const crossRowEdgeExposure = Math.abs(flow.z) * Math.exp(-upwindDepthDistance / Math.max(1.2, geometry.panelLengthM));
       const edgeExposure = clamp(0.72 * lateralEdgeExposure + 0.42 * crossRowEdgeExposure, 0, 1);
       const screenEffects = getScreenFlowEffects(config, coordinates.xM, coordinates.zM, flow);
-      const localTi = clamp((config.ambientTurbulence / 100 + wakeBuild * 0.215 + edgeExposure * 0.045) * rowEffects.turbulenceFactor * screenEffects.turbulenceFactor, 0.035, 0.42);
+      const siteFlowEffects = getSiteFlowEffects(
+        coordinates.xM,
+        panelCenterHeightM,
+        coordinates.zM,
+        flow,
+        geometry,
+      );
+      const localDynamicPressureKpa = dynamicPressureKpa * siteFlowEffects.speedFactor ** 2;
+      const localTi = clamp((
+        config.ambientTurbulence / 100
+        + wakeBuild * 0.215
+        + edgeExposure * 0.045
+        + siteFlowEffects.turbulenceAdd
+      ) * rowEffects.turbulenceFactor * screenEffects.turbulenceFactor, 0.035, 0.48);
       const dampingRatio = (config.dampingPercent + rowEffects.dampingBoost) / 100;
       const rawDynamicFactor = 1 / Math.sqrt(Math.pow(1 - frequencyRatio * frequencyRatio, 2) + Math.pow(2 * dampingRatio * frequencyRatio, 2));
       const dynamicFactor = clamp(rawDynamicFactor, 0.45, 8);
@@ -703,9 +980,15 @@ export function simulate(config: SimulationConfig): SimulationResult {
       const shelter = 1 - 0.11 * wakeBuild;
       const undersideCoefficient = 0.49 + 0.38 * Math.max(0, flow.z);
       const pressureFactor = rowEffects.pressureFactor * screenEffects.pressureFactor;
-      const meanUpliftKpa = dynamicPressureKpa * undersideCoefficient * shelter * pressureFactor;
-      const peakUpliftKpa = dynamicPressureKpa * (undersideCoefficient * shelter + edgeExposure * 0.21 + 2.45 * localTi) * pressureFactor;
-      const vibrationIndex = clamp(100 * (dynamicPressureKpa / 0.95) * (localTi / 0.3) * resonanceWeight * (0.74 + 0.26 * wakeBuild), 0, 100);
+      const meanUpliftKpa = localDynamicPressureKpa * undersideCoefficient * shelter * pressureFactor;
+      const peakUpliftKpa = localDynamicPressureKpa * (
+        undersideCoefficient * shelter + edgeExposure * 0.21 + 2.45 * localTi
+      ) * pressureFactor;
+      const vibrationIndex = clamp(100
+        * (localDynamicPressureKpa / 0.95)
+        * (localTi / 0.3)
+        * resonanceWeight
+        * (0.74 + 0.26 * wakeBuild), 0, 100);
       return { ...coordinates, contributingWakeRows: contributingRows.size, turbulencePercent: localTi * 100, meanUpliftKpa, peakUpliftKpa, vibrationIndex, dynamicFactor };
     });
     const peakPanel = panels.reduce((current, panel) => panel.peakUpliftKpa > current.peakUpliftKpa ? panel : current);
