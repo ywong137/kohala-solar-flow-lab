@@ -444,7 +444,8 @@ export function WindScene({
         (point.y - gravelMinZ) / gravelDepth,
       );
     });
-    gravelFaces.forEach((face) => gravelIndices.push(face[0], face[1], face[2]));
+    // ShapeUtils triangulates in XY. Reverse each face after mapping Y to world Z.
+    gravelFaces.forEach((face) => gravelIndices.push(face[0], face[2], face[1]));
     const gravelGeometry = new THREE.BufferGeometry();
     gravelGeometry.setAttribute("position", new THREE.Float32BufferAttribute(gravelPositions, 3));
     gravelGeometry.setAttribute("uv", new THREE.Float32BufferAttribute(gravelUvs, 2));
