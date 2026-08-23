@@ -6,6 +6,9 @@ import {
   getArrayBounds,
   getRowOffsetX,
   getRowWidth,
+  getRetainingWallClearance,
+  getRowCenterZ,
+  getSoutheastEdgeLine,
   getScreenGeometry,
   simulate,
 } from "../app/lib/physics.ts";
@@ -35,10 +38,15 @@ const baseConfig = {
   damperEndRow: 1,
 };
 
-test("right-aligns both half rows with their adjacent full rows", () => {
+test("continues one southeast endpoint line through both half rows", () => {
   const rightEdge = (row) => getRowOffsetX(row, DEFAULT_ARRAY_CONFIG) + getRowWidth(row, DEFAULT_ARRAY_CONFIG) / 2;
-  assert.ok(Math.abs(rightEdge(1) - rightEdge(2)) < 0.001);
-  assert.ok(Math.abs(rightEdge(7) - rightEdge(6)) < 0.001);
+  const edgeLine = getSoutheastEdgeLine(DEFAULT_ARRAY_CONFIG);
+  for (let row = 1; row <= DEFAULT_ARRAY_CONFIG.rows.length; row += 1) {
+    const expectedX = edgeLine.interceptXM + edgeLine.slopeXPerZM * getRowCenterZ(row, DEFAULT_ARRAY_CONFIG);
+    assert.ok(Math.abs(rightEdge(row) - expectedX) < 0.001);
+    assert.ok(Math.abs(getRetainingWallClearance(rightEdge(row), getRowCenterZ(row, DEFAULT_ARRAY_CONFIG)) - 3) < 0.001);
+  }
+  assert.ok(Math.abs(edgeLine.bearingDeg - 53.5) < 0.2);
 });
 
 test("resolves every physical panel and column", () => {

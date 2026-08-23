@@ -22,9 +22,11 @@ export type ArrayGeometryConfig = {
   structuralDampingPercent: number;
 };
 
-export const ARRAY_CONFIG_STORAGE_KEY = "kohala-array-configuration-v2";
+export const ARRAY_CONFIG_STORAGE_KEY = "kohala-array-configuration-v3";
 
-const DEFAULT_ROW_OFFSETS_M = [4.019, -3.1, -1.55, 0, 1.55, 3.1, 10.219];
+// The southeast ends follow one diagonal line in the north-up satellite view.
+// Rows 1 and 7 remain half-length, but continue the same 1.55 m echelon.
+const DEFAULT_ROW_OFFSETS_M = [2.469, -3.1, -1.55, 0, 1.55, 3.1, 11.769];
 const DEFAULT_ROW_COLUMNS = [14, 28, 28, 28, 28, 28, 14];
 
 export const DEFAULT_ARRAY_CONFIG: ArrayGeometryConfig = {

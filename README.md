@@ -7,7 +7,7 @@ The model includes:
 - a panel-level pressure and vibration screening solver;
 - editable row counts, offsets, spacing, tilt, rack clearance, and dynamics;
 - porous screens, under-panel vanes, edge deflectors, and rail dampers;
-- immediate damage, post-storm cleanup, and fully restored site views;
+- post-storm cleanup and fully restored site views;
 - photo-based gray gravel, a curved volcanic rock retaining wall, a rounded hillside, ocean, distant hills, and sky geometry.
 
 This is a screening model. It is not final CFD or a structural design calculation.

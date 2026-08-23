@@ -52,6 +52,58 @@ export function getArrayBounds(geometry = DEFAULT_ARRAY_CONFIG) {
   return { minX, maxX, centerX: (minX + maxX) / 2, width: maxX - minX };
 }
 
+export type SoutheastEdgeLine = {
+  slopeXPerZM: number;
+  interceptXM: number;
+  bearingDeg: number;
+};
+
+export function getSoutheastEdgeLine(geometry = DEFAULT_ARRAY_CONFIG): SoutheastEdgeLine {
+  const samples = geometry.rows.map((_, index) => {
+    const row = index + 1;
+    return {
+      z: getRowCenterZ(row, geometry),
+      x: getRowOffsetX(row, geometry) + getRowWidth(row, geometry) / 2,
+    };
+  });
+  const meanZ = samples.reduce((sum, sample) => sum + sample.z, 0) / samples.length;
+  const meanX = samples.reduce((sum, sample) => sum + sample.x, 0) / samples.length;
+  const denominator = samples.reduce((sum, sample) => sum + (sample.z - meanZ) ** 2, 0);
+  const slopeXPerZM = denominator > 0
+    ? samples.reduce((sum, sample) => sum + (sample.z - meanZ) * (sample.x - meanX), 0) / denominator
+    : 0;
+  const interceptXM = meanX - slopeXPerZM * meanZ;
+
+  const xBearingRad = geometry.arrayAxisBearing * RAD;
+  const zBearingRad = ((geometry.maukaBearing + 180) % 360) * RAD;
+  const east = slopeXPerZM * Math.sin(xBearingRad) + Math.sin(zBearingRad);
+  const north = slopeXPerZM * Math.cos(xBearingRad) + Math.cos(zBearingRad);
+  const directionalBearing = (Math.atan2(east, north) / RAD + 360) % 360;
+  const bearingDeg = directionalBearing >= 180 ? directionalBearing - 180 : directionalBearing;
+
+  return { slopeXPerZM, interceptXM, bearingDeg };
+}
+
+export function getRetainingWallX(
+  z: number,
+  geometry = DEFAULT_ARRAY_CONFIG,
+  perpendicularClearanceM = 3,
+) {
+  const edge = getSoutheastEdgeLine(geometry);
+  const normalScale = Math.hypot(1, edge.slopeXPerZM);
+  return edge.interceptXM + edge.slopeXPerZM * z + perpendicularClearanceM * normalScale;
+}
+
+export function getRetainingWallClearance(
+  x: number,
+  z: number,
+  geometry = DEFAULT_ARRAY_CONFIG,
+) {
+  const edge = getSoutheastEdgeLine(geometry);
+  const wallIntercept = getRetainingWallX(0, geometry);
+  return Math.abs(x - edge.slopeXPerZM * z - wallIntercept) / Math.hypot(1, edge.slopeXPerZM);
+}
+
 export type ViewMode = "flow" | "pressure" | "vibration";
 export type MitigationId = "none" | "screen" | "vanes" | "spoilers" | "dampers";
 export type SpoilerStyle = "perforated" | "continuous" | "tabs";

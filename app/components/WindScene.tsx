@@ -10,6 +10,7 @@ import {
   getFlowComponents,
   getInstalledScreenRows,
   getPanelResult,
+  getRetainingWallX,
   getRowCenterZ,
   getRowOffsetX,
   getRowWidth,
@@ -22,7 +23,7 @@ import {
 } from "../lib/physics";
 
 type SelectedPanel = { row: number; module: number };
-export type ArrayState = "immediate" | "repaired" | "restored";
+export type ArrayState = "repaired" | "restored";
 
 type WindSceneProps = {
   config: SimulationConfig;
@@ -43,12 +44,6 @@ type PanelVisual = {
   module: number;
   baseRotationX: number;
   basePosition: THREE.Vector3;
-  immediatePosition: THREE.Vector3;
-  immediateRotation: THREE.Euler;
-  immediateDamaged: boolean;
-  immediatePresent: boolean;
-  immediateState: ImmediatePanelState;
-  crack?: THREE.Mesh;
 };
 
 type RackVisual = {
@@ -63,124 +58,6 @@ type FlowSample = {
   vz: number;
   turbulence: number;
 };
-
-type ImmediatePanelState = "intact" | "attached" | "rack" | "upright" | "gravel" | "downhill" | "missing";
-
-type PhotoDamageSymbol = "A" | "R" | "U" | "G" | "D" | "M";
-
-// Each string is one portrait-module lane, ordered from the northwest end to the southeast wall.
-// Row 1 starts at the array midpoint because the saved geometry right-aligns its 14 columns.
-const PHOTO_DAMAGE_LAYOUT: Record<1 | 2, readonly [string, string]> = {
-  1: [
-    "AAAAMRRUUUURRR",
-    "MMMAAAARRRRRRR",
-  ],
-  2: [
-    "AAAAAAAARRRRAAAMMDRRRRRMMMMM",
-    "AAAAAAAARRRRAAARRRRRGMMMMDDD",
-  ],
-};
-
-const PHOTO_DAMAGE_SYMBOL_STATE: Record<PhotoDamageSymbol, Exclude<ImmediatePanelState, "intact">> = {
-  A: "attached",
-  R: "rack",
-  U: "upright",
-  G: "gravel",
-  D: "downhill",
-  M: "missing",
-};
-
-type PhotoDamagePose = {
-  x: number;
-  z: number;
-  height: number;
-  pitchDeg: number;
-  yawDeg: number;
-  rollDeg: number;
-  terrain: boolean;
-};
-
-// These poses trace the loose-panel groups across the front, front-right, corner, and makai photos.
-const PHOTO_DAMAGE_POSES: Record<string, PhotoDamagePose> = {
-  "1:6": { x: 3.0, z: 18.38, height: 0.76, pitchDeg: 31, yawDeg: -14, rollDeg: 5, terrain: false },
-  "1:7": { x: 4.3, z: 18.62, height: 0.58, pitchDeg: 19, yawDeg: 9, rollDeg: -4, terrain: false },
-  "1:8": { x: 1.25, z: 18.66, height: 0.98, pitchDeg: 84, yawDeg: -8, rollDeg: -3, terrain: false },
-  "1:9": { x: 2.32, z: 18.78, height: 0.98, pitchDeg: 87, yawDeg: -3, rollDeg: 2, terrain: false },
-  "1:10": { x: 3.39, z: 18.7, height: 0.98, pitchDeg: 84, yawDeg: 3, rollDeg: -2, terrain: false },
-  "1:11": { x: 4.46, z: 18.86, height: 0.98, pitchDeg: 86, yawDeg: 8, rollDeg: 4, terrain: false },
-  "1:12": { x: 6.0, z: 18.28, height: 1.08, pitchDeg: 47, yawDeg: -17, rollDeg: 6, terrain: false },
-  "1:13": { x: 7.35, z: 18.48, height: 0.95, pitchDeg: 39, yawDeg: 4, rollDeg: -5, terrain: false },
-  "1:14": { x: 8.7, z: 18.72, height: 0.78, pitchDeg: 32, yawDeg: 14, rollDeg: 4, terrain: false },
-  "1:22": { x: 1.1, z: 20.72, height: 0.7, pitchDeg: 35, yawDeg: -13, rollDeg: 5, terrain: false },
-  "1:23": { x: 2.42, z: 20.92, height: 0.58, pitchDeg: 28, yawDeg: 9, rollDeg: -4, terrain: false },
-  "1:24": { x: 3.7, z: 21.0, height: 0.48, pitchDeg: 26, yawDeg: -20, rollDeg: 4, terrain: false },
-  "1:25": { x: 4.95, z: 21.32, height: 0.4, pitchDeg: 20, yawDeg: 13, rollDeg: -4, terrain: false },
-  "1:26": { x: 6.15, z: 21.65, height: 0.34, pitchDeg: 14, yawDeg: -7, rollDeg: 3, terrain: false },
-  "1:27": { x: 7.4, z: 21.45, height: 0.54, pitchDeg: 30, yawDeg: 6, rollDeg: -5, terrain: false },
-  "1:28": { x: 8.75, z: 21.1, height: 0.42, pitchDeg: 21, yawDeg: 15, rollDeg: 4, terrain: false },
-  "2:9": { x: -9.2, z: 11.75, height: 1.18, pitchDeg: 44, yawDeg: -10, rollDeg: 5, terrain: false },
-  "2:10": { x: -7.85, z: 12.08, height: 0.98, pitchDeg: 34, yawDeg: 7, rollDeg: -4, terrain: false },
-  "2:11": { x: -6.5, z: 12.42, height: 0.78, pitchDeg: 25, yawDeg: -6, rollDeg: 4, terrain: false },
-  "2:12": { x: -5.15, z: 12.66, height: 0.62, pitchDeg: 18, yawDeg: 11, rollDeg: -3, terrain: false },
-  "2:18": { x: -34.5, z: 34.2, height: 0.08, pitchDeg: 3, yawDeg: -28, rollDeg: 2, terrain: true },
-  "2:19": { x: -3.5, z: 11.72, height: 1.12, pitchDeg: 39, yawDeg: -12, rollDeg: 5, terrain: false },
-  "2:20": { x: -2.15, z: 12.05, height: 0.94, pitchDeg: 31, yawDeg: 6, rollDeg: -4, terrain: false },
-  "2:21": { x: -0.8, z: 12.38, height: 0.76, pitchDeg: 24, yawDeg: -8, rollDeg: 4, terrain: false },
-  "2:22": { x: 0.55, z: 12.7, height: 0.62, pitchDeg: 18, yawDeg: 10, rollDeg: -3, terrain: false },
-  "2:23": { x: 1.85, z: 12.92, height: 0.55, pitchDeg: 16, yawDeg: -9, rollDeg: 4, terrain: false },
-  "2:37": { x: -7.6, z: 14.02, height: 0.58, pitchDeg: 28, yawDeg: -10, rollDeg: -5, terrain: false },
-  "2:38": { x: -6.2, z: 14.28, height: 0.46, pitchDeg: 20, yawDeg: 7, rollDeg: 4, terrain: false },
-  "2:39": { x: -4.8, z: 14.55, height: 0.38, pitchDeg: 14, yawDeg: -5, rollDeg: -4, terrain: false },
-  "2:40": { x: -3.4, z: 14.82, height: 0.34, pitchDeg: 10, yawDeg: 12, rollDeg: 4, terrain: false },
-  "2:44": { x: -1.25, z: 14.0, height: 0.68, pitchDeg: 34, yawDeg: -13, rollDeg: 5, terrain: false },
-  "2:45": { x: 0.2, z: 14.1, height: 0.62, pitchDeg: 31, yawDeg: -12, rollDeg: 5, terrain: false },
-  "2:46": { x: 1.55, z: 14.4, height: 0.5, pitchDeg: 23, yawDeg: 8, rollDeg: -4, terrain: false },
-  "2:47": { x: 2.9, z: 14.7, height: 0.4, pitchDeg: 16, yawDeg: -7, rollDeg: 4, terrain: false },
-  "2:48": { x: 4.25, z: 14.95, height: 0.34, pitchDeg: 11, yawDeg: 11, rollDeg: -3, terrain: false },
-  "2:49": { x: -5.8, z: 25.42, height: 0.08, pitchDeg: 3, yawDeg: 18, rollDeg: -2, terrain: false },
-  "2:54": { x: -39.5, z: 31.8, height: 0.08, pitchDeg: 4, yawDeg: -22, rollDeg: -2, terrain: true },
-  "2:55": { x: -43.5, z: 37.1, height: 0.08, pitchDeg: 2, yawDeg: 16, rollDeg: 2, terrain: true },
-  "2:56": { x: -31.5, z: 40.2, height: 0.08, pitchDeg: 5, yawDeg: -7, rollDeg: -3, terrain: true },
-};
-
-function getImmediatePanelState(
-  row: number,
-  module: number,
-  columns: number,
-  panelsDeep: number,
-): ImmediatePanelState {
-  if (row > 2) return "intact";
-  const isPhotoDefault = panelsDeep === 2 && ((row === 1 && columns === 14) || (row === 2 && columns === 28));
-  if (isPhotoDefault) {
-    const depthIndex = Math.floor((module - 1) / columns);
-    const columnIndex = (module - 1) % columns;
-    const symbol = PHOTO_DAMAGE_LAYOUT[row as 1 | 2][depthIndex]?.[columnIndex] as PhotoDamageSymbol | undefined;
-    return symbol ? PHOTO_DAMAGE_SYMBOL_STATE[symbol] : "missing";
-  }
-
-  const presentRatio = row === 1 ? 18 / 28 : 37 / 56;
-  const attachedRatio = row === 1 ? 8 / 24 : 22 / 45;
-  if (hash(row * 1000 + module) > presentRatio) return "missing";
-  return hash(row * 2000 + module) < attachedRatio ? "attached" : "rack";
-}
-
-function getImmediateInventory(rows: Array<{ columns: number; panelsDeep: number }>) {
-  const counts = { attached: 0, rack: 0, upright: 0, gravel: 0, downhill: 0, missing: 0 };
-  rows.slice(0, 2).forEach((row, rowIndex) => {
-    const rowNumber = rowIndex + 1;
-    for (let moduleNumber = 1; moduleNumber <= row.columns * row.panelsDeep; moduleNumber += 1) {
-      const state = getImmediatePanelState(rowNumber, moduleNumber, row.columns, row.panelsDeep);
-      if (state !== "intact") counts[state] += 1;
-    }
-  });
-  const displaced = counts.rack + counts.upright + counts.gravel + counts.downhill;
-  return {
-    ...counts,
-    displaced,
-    ground: counts.gravel + counts.downhill,
-    visible: counts.attached + displaced,
-  };
-}
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 const approximateGaussian = () =>
@@ -371,7 +248,6 @@ export function WindScene({
 }: WindSceneProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const geometryKey = JSON.stringify(config.geometry);
-  const immediateInventory = getImmediateInventory(config.geometry.rows);
   const liveRef = useRef({
     config,
     result,
@@ -468,12 +344,12 @@ export function WindScene({
     const gravelDepth = (rowCount - 1) * rowSpacingM + tableChordM + 12;
     const gravelCenterZ = 0.8;
     const gravelMinX = arrayBounds.minX - 7;
-    const wallBaseX = arrayBounds.maxX + 3;
     const gravelMinZ = gravelCenterZ - gravelDepth / 2;
     const gravelMaxZ = gravelCenterZ + gravelDepth / 2;
     const wallDepth = gravelDepth + 3;
     const wallMinZ = gravelCenterZ - wallDepth / 2;
     const wallMaxZ = gravelCenterZ + wallDepth / 2;
+    const wallXAt = (z: number) => getRetainingWallX(z, geometry);
     const retainedHillWidth = 84;
     const wallProgressAt = (z: number) => clamp((z - wallMinZ) / wallDepth, 0, 1);
     const wallTopHeightAt = (z: number) => {
@@ -481,7 +357,7 @@ export function WindScene({
       return 0.63 + Math.pow(Math.max(0, arch), 0.72) * 1.62;
     };
     const retainedHillHeightAt = (x: number, z: number) => {
-      const localWallX = wallBaseX;
+      const localWallX = wallXAt(z);
       const crossProgress = clamp((x - localWallX) / retainedHillWidth, 0, 1);
       const rearProgress = clamp((wallMaxZ - z) / wallDepth, 0, 1);
       const roundedRise = Math.sin(crossProgress * Math.PI) * (1.25 + rearProgress * 0.48);
@@ -494,7 +370,7 @@ export function WindScene({
       const makaiDrop = Math.max(0, z - gravelMaxZ) * 0.055;
       const maukaRise = Math.max(0, gravelMinZ - z) * 0.006;
       const lowerSlope = -0.08 - leftDrop - makaiDrop + maukaRise;
-      if (x <= wallBaseX) return lowerSlope;
+      if (x <= wallXAt(z)) return lowerSlope;
 
       const endDistance = z < wallMinZ ? wallMinZ - z : z > wallMaxZ ? z - wallMaxZ : 0;
       const wallInfluence = Math.exp(-Math.pow(endDistance / 15, 2));
@@ -529,7 +405,7 @@ export function WindScene({
     for (let segment = 0; segment <= gravelSegments; segment += 1) {
       const progress = segment / gravelSegments;
       const z = gravelMinZ + progress * gravelDepth;
-      const rightX = wallBaseX;
+      const rightX = wallXAt(z);
       gravelPositions.push(gravelMinX, -0.035, z, rightX, -0.035, z);
       gravelUvs.push(0, progress, 1, progress);
       if (segment < gravelSegments) {
@@ -562,7 +438,7 @@ export function WindScene({
     for (let segment = 0; segment <= gravelSegments; segment += 1) {
       const progress = segment / gravelSegments;
       const z = wallMinZ + progress * wallDepth;
-      const edgeX = wallBaseX;
+      const edgeX = wallXAt(z);
       hillApronPositions.push(
         edgeX + 0.12, wallTopHeightAt(z) + 0.015, z,
         edgeX + 3.2, retainedHillHeightAt(edgeX + 3.2, z) + 0.015, z,
@@ -637,7 +513,7 @@ export function WindScene({
       const { column, layer, layers, z } = wallStoneData[index];
       const top = wallTopHeightAt(z);
       stone.position.set(
-        wallBaseX + (hash(index + 900) - 0.5) * 0.58,
+        wallXAt(z) + (hash(index + 900) - 0.5) * 0.58,
         (layer + 0.52) * (top / layers) + hash(index + 930) * 0.035,
         z + (hash(index + 960) - 0.5) * 0.22,
       );
@@ -654,7 +530,6 @@ export function WindScene({
     scene.add(arrayGroup);
     const panelVisuals: PanelVisual[] = [];
     const rackVisuals: RackVisual[] = [];
-    const rowLabels: THREE.Sprite[] = [];
     const clickablePanels: THREE.Object3D[] = [];
     const panelTexture = makePanelTexture(renderer);
     const frameMaterial = new THREE.MeshStandardMaterial({ color: 0xb8c0be, metalness: 0.7, roughness: 0.32 });
@@ -722,78 +597,6 @@ export function WindScene({
           glass.receiveShadow = true;
           glass.userData = { row: rowNumber, module: moduleNumber };
           assembly.add(glass);
-          const immediateState = getImmediatePanelState(rowNumber, moduleNumber, rowColumns, rowConfig.panelsDeep);
-          const immediateDamaged = !["intact", "attached", "missing"].includes(immediateState);
-          const immediatePresent = immediateState !== "missing";
-          const immediatePosition = assembly.position.clone();
-          const immediateRotation = new THREE.Euler(tilt, 0, 0);
-          if (immediateDamaged) {
-            const damageKey = `${rowNumber}:${moduleNumber}`;
-            const photoDefaultRow = rowConfig.panelsDeep === 2
-              && ((rowNumber === 1 && rowColumns === 14) || (rowNumber === 2 && rowColumns === 28));
-            const photoPose = photoDefaultRow ? PHOTO_DAMAGE_POSES[damageKey] : undefined;
-            if (photoPose) {
-              immediatePosition.set(
-                photoPose.x,
-                photoPose.terrain
-                  ? siteTerrainHeightAt(photoPose.x, photoPose.z) + photoPose.height
-                  : photoPose.height,
-                photoPose.z,
-              );
-              immediateRotation.set(
-                THREE.MathUtils.degToRad(photoPose.pitchDeg),
-                THREE.MathUtils.degToRad(photoPose.yawDeg),
-                THREE.MathUtils.degToRad(photoPose.rollDeg),
-              );
-            } else if (immediateState === "downhill") {
-              const gravelWidthAtFront = wallBaseX - gravelMinX;
-              immediatePosition.x = gravelMinX + 1.5 + hash(moduleNumber + rowNumber * 47) * (gravelWidthAtFront - 3);
-              immediatePosition.z = gravelMaxZ + 1.5 + hash(moduleNumber + rowNumber * 71) * 7.5;
-              immediatePosition.y = siteTerrainHeightAt(immediatePosition.x, immediatePosition.z) + 0.09;
-              immediateRotation.set(
-                THREE.MathUtils.degToRad(1 + hash(moduleNumber + 271) * 5),
-                (hash(moduleNumber + 301) - 0.5) * 1.5,
-                (hash(moduleNumber + 331) - 0.5) * 0.08,
-              );
-            } else if (immediateState === "upright") {
-              immediatePosition.x += (hash(moduleNumber + rowNumber * 89) - 0.5) * 1.3;
-              immediatePosition.z += 0.4 + hash(moduleNumber + 361) * 1.1;
-              immediatePosition.y = panelSlopeM * 0.48;
-              immediateRotation.set(
-                THREE.MathUtils.degToRad(78 + hash(moduleNumber + 391) * 9),
-                (hash(moduleNumber + 421) - 0.5) * 0.42,
-                (hash(moduleNumber + 451) - 0.5) * 0.28,
-              );
-            } else if (immediateState === "gravel") {
-              immediatePosition.z = gravelMaxZ - 3.5 + hash(moduleNumber + 631) * 2.2;
-              immediatePosition.y = 0.08;
-              immediateRotation.set(
-                THREE.MathUtils.degToRad(2 + hash(moduleNumber + 691) * 4),
-                (hash(moduleNumber + 751) - 0.5) * 0.75,
-                (hash(moduleNumber + 781) - 0.5) * 0.08,
-              );
-            } else {
-              immediatePosition.x += (hash(moduleNumber + rowNumber * 107) - 0.5) * 2.6;
-              immediatePosition.z += 0.2 + hash(moduleNumber + 631) * 1.8;
-              immediatePosition.y = 0.18 + hash(moduleNumber + 661) * 0.16;
-              immediateRotation.set(
-                THREE.MathUtils.degToRad(8 + hash(moduleNumber + 691) * 18),
-                (hash(moduleNumber + 751) - 0.5) * 0.62,
-                (hash(moduleNumber + 781) - 0.5) * 0.18,
-              );
-            }
-          }
-          let crack: THREE.Mesh | undefined;
-          if (immediateDamaged && immediatePresent && moduleNumber % 9 === 0) {
-            crack = new THREE.Mesh(
-              new THREE.BoxGeometry(0.018, 0.012, panelSlopeM * 0.72),
-              new THREE.MeshBasicMaterial({ color: 0xcbd6d6 }),
-            );
-            crack.position.y = 0.062;
-            crack.rotation.y = 0.38;
-            crack.visible = false;
-            assembly.add(crack);
-          }
           arrayGroup.add(assembly);
           panelVisuals.push({
             assembly,
@@ -802,12 +605,6 @@ export function WindScene({
             module: moduleNumber,
             baseRotationX: tilt,
             basePosition: assembly.position.clone(),
-            immediatePosition,
-            immediateRotation,
-            immediateDamaged,
-            immediatePresent,
-            immediateState,
-            crack,
           });
           clickablePanels.push(glass);
         }
@@ -840,7 +637,6 @@ export function WindScene({
       label.position.set(rowOffsetX - rowWidth / 2 - 3.35, 1.15, z);
       label.scale.set(4.9, 1.22, 1);
       arrayGroup.add(label);
-      rowLabels.push(label);
     }
 
     const maukaLabel = makeTextSprite("MAUKA · NE · UPWIND", "accent");
@@ -1133,7 +929,7 @@ export function WindScene({
       const sideDistance = Math.max(52, sceneDepth * 0.72);
       const planHeight = Math.max(68, sceneExtent * 0.86);
       const targets = {
-        perspective: { position: new THREE.Vector3(wallBaseX - 2.4, Math.max(4.8, sceneDepth * 0.07), sideDistance * 0.56), target: new THREE.Vector3(arrayCenterX, 0.9, 12) },
+        perspective: { position: new THREE.Vector3(wallXAt(12) - 2.4, Math.max(4.8, sceneDepth * 0.07), sideDistance * 0.56), target: new THREE.Vector3(arrayCenterX, 0.9, 12) },
         mauka: { position: new THREE.Vector3(arrayCenterX, sideDistance * 0.23, -sideDistance), target: new THREE.Vector3(arrayCenterX, 0.7, 2) },
         makai: { position: new THREE.Vector3(arrayCenterX, Math.max(4.6, sceneDepth * 0.064), sideDistance * 0.59), target: new THREE.Vector3(arrayCenterX, 0.85, 10.5) },
         plan: { position: new THREE.Vector3(arrayCenterX, planHeight, 0.01), target: new THREE.Vector3(arrayCenterX, 0, 0) },
@@ -1311,10 +1107,6 @@ export function WindScene({
         live.selectedPanel.module,
       ].join("-");
       if (visualKey !== lastVisualKey) {
-        const showSceneLabels = live.arrayState !== "immediate" || live.cameraView === "plan";
-        rowLabels.forEach((label) => { label.visible = showSceneLabels; });
-        maukaLabel.visible = showSceneLabels;
-        makaiLabel.visible = showSceneLabels;
         const maxPressure = Math.max(...live.result.rows.map((row) => row.peakUpliftKpa), 0.01);
         let activePanel: PanelVisual | null = null;
         for (const panel of panelVisuals) {
@@ -1329,21 +1121,9 @@ export function WindScene({
           panel.glass.material.color.copy(color);
           panel.glass.material.emissive.copy(selected ? new THREE.Color(0xffd84f) : color.clone().multiplyScalar(0.19));
           panel.glass.material.emissiveIntensity = selected ? 2.1 : live.viewMode === "flow" ? 0.32 : 0.66;
-          panel.assembly.visible = !(live.arrayState === "repaired" && panel.row <= 2)
-            && !(live.arrayState === "immediate" && !panel.immediatePresent);
-          if (live.arrayState === "immediate" && panel.row <= 2 && !panel.immediateDamaged) {
-            panel.glass.material.color.set(0x66858b);
-          }
-          if (live.arrayState === "immediate" && panel.immediateDamaged) {
-            panel.assembly.position.copy(panel.immediatePosition);
-            panel.assembly.rotation.copy(panel.immediateRotation);
-            panel.glass.material.color.set(0x829799);
-            panel.glass.material.emissiveIntensity = selected ? 1.4 : 0.12;
-          } else {
-            panel.assembly.position.copy(panel.basePosition);
-            panel.assembly.rotation.set(panel.baseRotationX, 0, 0);
-          }
-          if (panel.crack) panel.crack.visible = live.arrayState === "immediate" && panel.immediateDamaged;
+          panel.assembly.visible = !(live.arrayState === "repaired" && panel.row <= 2);
+          panel.assembly.position.copy(panel.basePosition);
+          panel.assembly.rotation.set(panel.baseRotationX, 0, 0);
           if (selected && panel.assembly.visible) activePanel = panel;
         }
         for (const rack of rackVisuals) {
@@ -1539,7 +1319,6 @@ export function WindScene({
       selectionMarker.scale.setScalar(selectionPulse);
       selectionMaterial.opacity = 0.86 + Math.sin(elapsed * 3.2) * 0.1;
       for (const panel of panelVisuals) {
-        if (live.arrayState === "immediate" && panel.immediateDamaged) continue;
         const panelResult = getPanelResult(live.result, panel.row, panel.module);
         const amplitude = vibrationScale * panelResult.vibrationIndex * 0.00011;
         const phase = panel.module * 0.31 + panel.row * 0.72;
@@ -1597,11 +1376,6 @@ export function WindScene({
               : `SCREENS BEHIND ROWS ${config.screenStartRow}–${config.screenEndRow}`
             : MITIGATIONS[config.mitigation].short}
         </strong>
-        {arrayState === "immediate" ? (
-          <strong>
-            {immediateInventory.visible} PHOTO-RESOLVED · {immediateInventory.attached} MOUNTED · {immediateInventory.rack} PILED ON RACKS · {immediateInventory.upright} UPRIGHT · {immediateInventory.ground} GROUND · {immediateInventory.missing} UNSEEN
-          </strong>
-        ) : null}
       </div>
       <div className="scene-drag-hint">Drag to orbit · Scroll to zoom · Select a panel</div>
     </div>

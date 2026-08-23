@@ -40,6 +40,7 @@ import {
   SCENARIOS,
   cardinalDirection,
   getPanelResult,
+  getSoutheastEdgeLine,
   riskColor,
   simulate,
   type MitigationId,
@@ -95,6 +96,7 @@ export function WindLab() {
   const [showAssumptions, setShowAssumptions] = useState(false);
   const windAudio = useWindAudio(windSpeedMph, ambientTurbulence, playing);
   const geometryMetrics = useMemo(() => getArrayMetrics(geometry), [geometry]);
+  const southeastEdge = useMemo(() => getSoutheastEdgeLine(geometry), [geometry]);
   const rowCount = geometryMetrics.rowCount;
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -347,7 +349,6 @@ export function WindLab() {
             <Eye size={15} />
             <span>Site condition</span>
             <select value={arrayState} onChange={(event) => setArrayState(event.target.value as ArrayState)}>
-              <option value="immediate">Immediate damage · surviving panels</option>
               <option value="repaired">Post-storm cleanup</option>
               <option value="restored">Fully restored array</option>
             </select>
@@ -790,7 +791,7 @@ export function WindLab() {
               <div>
                 <span className="eyebrow">SOURCE IMAGERY</span>
                 <h2>Geometry and failure evidence</h2>
-                <p>The model uses the satellite image, the cleaned condition, and four immediate damage views.</p>
+                <p>The model uses the north-up satellite image and the post-storm cleanup image.</p>
               </div>
               <button className="icon-button" onClick={() => setShowEvidence(false)} aria-label="Close evidence"><X size={18} /></button>
             </div>
@@ -798,32 +799,12 @@ export function WindLab() {
               <figure>
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src="/reference/satellite.png" alt="Satellite view of the facility and the large solar array" />
-                <figcaption><strong>North-up site view</strong><span>{geometry.rowSpacingM.toFixed(2)} m row pitch · saved per-row southeast offsets</span></figcaption>
+                <figcaption><strong>North-up site view</strong><span>{geometry.rowSpacingM.toFixed(2)} m row pitch · {southeastEdge.bearingDeg.toFixed(0)}° southeast endpoint line</span></figcaption>
               </figure>
               <figure>
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src="/reference/post-storm.png" alt="Post-storm image showing the first two rows removed" />
                 <figcaption><strong>Post-storm cleanup</strong><span>Rows 1–2 removed · intact modules consolidated into Rows 3–7</span></figcaption>
-              </figure>
-              <figure>
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src="/reference/damage-from-front.png" alt="Immediate storm damage seen from the front of the array" />
-                <figcaption><strong>Immediate damage · front</strong><span>Collapsed front racks, overlapping modules, and gaps into Row 3</span></figcaption>
-              </figure>
-              <figure>
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src="/reference/damage-from-front-right.png" alt="Immediate storm damage seen from the front right" />
-                <figcaption><strong>Immediate damage · front right</strong><span>Flat debris, folded modules, and upright panels near the southeast end</span></figcaption>
-              </figure>
-              <figure>
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src="/reference/damage-from-front-right-corner.png" alt="Close view of immediate storm damage at the front right corner" />
-                <figcaption><strong>Immediate damage · corner</strong><span>Cracked glass, surviving racks, and loose modules on gray gravel</span></figcaption>
-              </figure>
-              <figure>
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src="/reference/damage-from-makai.png" alt="Distant immediate storm damage view from the makai side" />
-                <figcaption><strong>Immediate damage · makai overview</strong><span>Cut gravel terrace, volcanic rock wall, and loose panels scattered downhill</span></figcaption>
               </figure>
             </div>
           </section>
@@ -846,8 +827,7 @@ export function WindLab() {
               <article><span>02</span><h3>Panel flow field</h3><p>The solver evaluates all {geometryMetrics.totalPanelCount} panels. It tracks angled wake overlap, exposed columns, row offset, screen shelter, and wake decay.</p></article>
               <article><span>03</span><h3>Local vibration</h3><p>Each panel uses its local turbulence and pressure. Dampers change only the fitted rows. This model is not full CFD.</p></article>
               <article><span>04</span><h3>Array totals</h3><p>The saved layout has {geometryMetrics.totalPanelCount} panels. It has {geometryMetrics.panelCounts.slice(2).reduce((sum, count) => sum + count, 0)} after Rows 1 and 2 are removed.</p></article>
-              <article><span>05</span><h3>Estimated rack and site</h3><p>The rack uses a {geometryMetrics.tableChordM.toFixed(2)} m maximum slope and {geometry.lowEdgeClearanceM.toFixed(2)}–{geometryMetrics.highEdgeClearanceM.toFixed(2)} m clearance. The wall stays straight in plan. Its top rises at the center. The retained hill meets its upper edge.</p></article>
-              <article><span>09</span><h3>Immediate damage</h3><p>The two primary damage views resolve 69 front panels. They show 30 mounted, 30 piled on racks, 4 upright, 1 on gravel, and 4 downhill. The other 15 panels are not visible. All racks remain installed.</p></article>
+              <article><span>05</span><h3>Estimated rack and site</h3><p>The rack uses a {geometryMetrics.tableChordM.toFixed(2)} m maximum slope and {geometry.lowEdgeClearanceM.toFixed(2)}–{geometryMetrics.highEdgeClearanceM.toFixed(2)} m clearance. The straight retaining wall follows the {southeastEdge.bearingDeg.toFixed(0)}° endpoint line at 3 m perpendicular clearance. Its top rises at the center.</p></article>
               <article><span>08</span><h3>Research-based dynamics</h3><p>The defaults use the low end of field tests on a tracking PV rack: 2.9 Hz torsional frequency and 1.1% damping. This fixed rack still needs a site modal test.</p></article>
               <article><span>06</span><h3>Recorded wind</h3><p>The sound control uses the CC0 “Steady wind” recording from the USC/Sunset sound-effects collection. Speed controls its gain and playback rate.</p></article>
             </div>
