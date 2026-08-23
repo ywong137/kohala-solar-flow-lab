@@ -16,7 +16,6 @@ import {
   getRowWidth,
   getScreenFlowEffects,
   getScreenGeometry,
-  riskColor,
   rowIsInRange,
   type MitigationId,
   type SimulationConfig,
@@ -37,6 +36,7 @@ type WindSceneProps = {
   cameraView: "perspective" | "mauka" | "makai" | "plan";
   cameraRequest: number;
   selectedPanel: SelectedPanel;
+  colorCodeMitigations: boolean;
   onSelectPanel: (panel: SelectedPanel) => void;
 };
 
@@ -304,6 +304,7 @@ export function WindScene({
   cameraView,
   cameraRequest,
   selectedPanel,
+  colorCodeMitigations,
   onSelectPanel,
 }: WindSceneProps) {
   const hostRef = useRef<HTMLDivElement>(null);
@@ -318,6 +319,7 @@ export function WindScene({
     cameraView,
     cameraRequest,
     selectedPanel,
+    colorCodeMitigations,
     onSelectPanel,
   });
 
@@ -332,9 +334,10 @@ export function WindScene({
       cameraView,
       cameraRequest,
       selectedPanel,
+      colorCodeMitigations,
       onSelectPanel,
     };
-  }, [config, result, viewMode, playing, arrayState, showSceneLabels, cameraView, cameraRequest, selectedPanel, onSelectPanel]);
+  }, [config, result, viewMode, playing, arrayState, showSceneLabels, cameraView, cameraRequest, selectedPanel, colorCodeMitigations, onSelectPanel]);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -802,17 +805,27 @@ export function WindScene({
       emissiveIntensity: 2.4,
     });
     type DeviceConcept = Exclude<MitigationId, "none">;
-    const deviceMaterials: Record<DeviceConcept, Map<number, THREE.MeshStandardMaterial>> = {
-      screen: new Map(),
-      vanes: new Map(),
-      spoilers: new Map(),
-      dampers: new Map(),
-    };
     const deviceBaseColors: Record<DeviceConcept, THREE.Color> = {
       screen: new THREE.Color(0x7df0c5),
       vanes: new THREE.Color(0x5ddcff),
       spoilers: new THREE.Color(0xff9b57),
       dampers: new THREE.Color(0xff66d8),
+    };
+    const deviceMaterialVisuals: Array<{
+      concept: DeviceConcept;
+      row: number;
+      element: number;
+      material: THREE.MeshStandardMaterial;
+    }> = [];
+    const registerDeviceMaterial = (
+      concept: DeviceConcept,
+      row: number,
+      element: number,
+      template: THREE.MeshStandardMaterial,
+    ) => {
+      const material = template.clone();
+      deviceMaterialVisuals.push({ concept, row, element, material });
+      return material;
     };
 
     const screenGroup = new THREE.Group();
@@ -821,36 +834,49 @@ export function WindScene({
       group: THREE.Group;
       posts: THREE.Mesh[];
       slats: THREE.Mesh[];
+      stripCount: number;
     }> = [];
     for (let row = 1; row <= rowCount; row += 1) {
-      const rowMaterial = row === 1 ? screenMaterial : screenMaterial.clone();
-      deviceMaterials.screen.set(row, rowMaterial);
       const screenGeometry = getScreenGeometry(row, geometry);
       const group = new THREE.Group();
       const posts: THREE.Mesh[] = [];
       const slats: THREE.Mesh[] = [];
-      const postCount = Math.max(5, Math.ceil(screenGeometry.width / 4) + 1);
+      const stripCount = 12;
+      const segmentCount = Math.max(1, Math.ceil(screenGeometry.width / 4));
+      const segmentWidth = screenGeometry.width / segmentCount;
+      const postCount = segmentCount + 1;
+      const bayMaterials = Array.from({ length: segmentCount }, (_, segment) =>
+        registerDeviceMaterial("screen", row, segment + 1, screenMaterial),
+      );
       for (let post = 0; post < postCount; post += 1) {
         const x = screenGeometry.x - screenGeometry.width / 2 + post * (screenGeometry.width / (postCount - 1));
         const pole = new THREE.Mesh(
           new THREE.CylinderGeometry(0.055, 0.055, 1, 10),
-          rowMaterial,
+          bayMaterials[Math.min(post, segmentCount - 1)],
         );
         pole.position.set(x, 1.1, screenGeometry.z);
         group.add(pole);
         posts.push(pole);
       }
-      for (let strip = 0; strip < 12; strip += 1) {
-        const slat = new THREE.Mesh(
-          new THREE.BoxGeometry(screenGeometry.width, 1, 0.075),
-          rowMaterial,
-        );
-        slat.position.set(screenGeometry.x, 0.2 + strip * 0.18, screenGeometry.z);
-        group.add(slat);
-        slats.push(slat);
+      for (let strip = 0; strip < stripCount; strip += 1) {
+        for (let segment = 0; segment < segmentCount; segment += 1) {
+          const slat = new THREE.Mesh(
+            new THREE.BoxGeometry(segmentWidth * 0.985, 1, 0.075),
+            bayMaterials[segment],
+          );
+          slat.position.set(
+            screenGeometry.x - screenGeometry.width / 2 + (segment + 0.5) * segmentWidth,
+            0.2 + strip * 0.18,
+            screenGeometry.z,
+          );
+          slat.userData.strip = strip;
+          slat.userData.segment = segment;
+          group.add(slat);
+          slats.push(slat);
+        }
       }
       screenGroup.add(group);
-      screenAssemblies.push({ row, group, posts, slats });
+      screenAssemblies.push({ row, group, posts, slats, stripCount });
     }
     scene.add(screenGroup);
     mitigationGroups.screen = screenGroup;
@@ -858,15 +884,16 @@ export function WindScene({
     const vaneGroup = new THREE.Group();
     const vaneVisuals: THREE.Mesh[] = [];
     for (let row = 1; row <= rowCount; row += 1) {
-      const rowMaterial = row === 1 ? vaneMaterial : vaneMaterial.clone();
-      deviceMaterials.vanes.set(row, rowMaterial);
       const z = getRowCenterZ(row, geometry);
       const rowOffsetX = getRowOffsetX(row, geometry);
       const rowWidth = getRowWidth(row, geometry);
       const rowHorizontalDepth = rowFlowGeometry[row - 1].horizontalDepth;
       const vaneCount = Math.max(3, Math.round(7 * rowWidth / fullRowWidth));
       for (let vane = 0; vane < vaneCount; vane += 1) {
-        const fin = new THREE.Mesh(new THREE.BoxGeometry(0.075, 0.72, 1), rowMaterial);
+        const fin = new THREE.Mesh(
+          new THREE.BoxGeometry(0.075, 0.72, 1),
+          registerDeviceMaterial("vanes", row, vane + 1, vaneMaterial),
+        );
         fin.position.set(
           rowOffsetX - rowWidth / 2 + 0.45 + vane * ((rowWidth - 0.9) / (vaneCount - 1)),
           0.43,
@@ -891,30 +918,41 @@ export function WindScene({
     const spoilerVisuals: THREE.Mesh[] = [];
     Object.values(spoilerStyleGroups).forEach((group) => spoilerGroup.add(group));
     for (let row = 1; row <= rowCount; row += 1) {
-      const rowMaterial = row === 1 ? spoilerMaterial : spoilerMaterial.clone();
-      deviceMaterials.spoilers.set(row, rowMaterial);
       const edgeZ = getRowCenterZ(row, geometry) + rowFlowGeometry[row - 1].horizontalDepth / 2;
       const rowColumns = geometry.rows[row - 1].columns;
       const rowOffsetX = getRowOffsetX(row, geometry);
-      const rowWidth = getRowWidth(row, geometry);
-      const continuous = new THREE.Mesh(new THREE.BoxGeometry(rowWidth, 1, 0.075), rowMaterial);
-      continuous.position.set(rowOffsetX, lowEdgeHeight + 0.15, edgeZ);
-      continuous.userData.row = row;
-      spoilerStyleGroups.continuous.add(continuous);
-      spoilerVisuals.push(continuous);
 
       for (let moduleIndex = 0; moduleIndex < rowColumns; moduleIndex += 1) {
         const x = rowOffsetX + (moduleIndex - (rowColumns - 1) / 2) * modulePitch;
-        const perforated = new THREE.Mesh(new THREE.BoxGeometry(modulePitch * 0.62, 1, 0.075), rowMaterial);
+        const element = moduleIndex + 1;
+        const continuous = new THREE.Mesh(
+          new THREE.BoxGeometry(modulePitch * 0.985, 1, 0.075),
+          registerDeviceMaterial("spoilers", row, element, spoilerMaterial),
+        );
+        continuous.position.set(x, lowEdgeHeight + 0.15, edgeZ);
+        continuous.userData.row = row;
+        continuous.userData.element = element;
+        spoilerStyleGroups.continuous.add(continuous);
+        spoilerVisuals.push(continuous);
+
+        const perforated = new THREE.Mesh(
+          new THREE.BoxGeometry(modulePitch * 0.62, 1, 0.075),
+          registerDeviceMaterial("spoilers", row, element, spoilerMaterial),
+        );
         perforated.position.set(x, lowEdgeHeight + 0.15, edgeZ);
         perforated.userData.row = row;
+        perforated.userData.element = element;
         spoilerStyleGroups.perforated.add(perforated);
         spoilerVisuals.push(perforated);
 
-        const tab = new THREE.Mesh(new THREE.BoxGeometry(modulePitch * 0.42, 1, 0.095), rowMaterial);
+        const tab = new THREE.Mesh(
+          new THREE.BoxGeometry(modulePitch * 0.42, 1, 0.095),
+          registerDeviceMaterial("spoilers", row, element, spoilerMaterial),
+        );
         tab.position.set(x, lowEdgeHeight + 0.15, edgeZ);
         tab.userData.angleOffset = moduleIndex % 2 === 0 ? -6 : 6;
         tab.userData.row = row;
+        tab.userData.element = element;
         spoilerStyleGroups.tabs.add(tab);
         spoilerVisuals.push(tab);
       }
@@ -923,28 +961,29 @@ export function WindScene({
     mitigationGroups.spoilers = spoilerGroup;
 
     const damperGroup = new THREE.Group();
-    const damperSets: Array<{ row: number; width: number; offsetX: number; meshes: THREE.Mesh[] }> = [];
+    const damperSets: Array<{ row: number; rail: number; width: number; offsetX: number; meshes: THREE.Mesh[] }> = [];
     const damperGlows: THREE.PointLight[] = [];
     const maxDampersPerRail = Math.ceil(fullRowWidth / 0.8) + 1;
     for (let row = 1; row <= rowCount; row += 1) {
-      const rowMaterial = row === 1 ? damperMaterial : damperMaterial.clone();
-      deviceMaterials.dampers.set(row, rowMaterial);
       const z = getRowCenterZ(row, geometry);
       const rowOffsetX = getRowOffsetX(row, geometry);
       const rowWidth = getRowWidth(row, geometry);
       const rowChordM = rowFlowGeometry[row - 1].tableChordM;
       const rowCenterHeight = rowFlowGeometry[row - 1].centerHeight;
-      for (const railZ of [-rowChordM * 0.39, -rowChordM * 0.13, rowChordM * 0.13, rowChordM * 0.39]) {
+      for (const [rail, railZ] of [-rowChordM * 0.39, -rowChordM * 0.13, rowChordM * 0.13, rowChordM * 0.39].entries()) {
         const set: THREE.Mesh[] = [];
         const railHeight = rowCenterHeight - Math.sin(tilt) * railZ - 0.12;
         for (let damper = 0; damper < maxDampersPerRail; damper += 1) {
-          const ring = new THREE.Mesh(new THREE.TorusGeometry(0.14, 0.052, 10, 18), rowMaterial);
+          const ring = new THREE.Mesh(
+            new THREE.TorusGeometry(0.14, 0.052, 10, 18),
+            damperMaterial.clone(),
+          );
           ring.rotation.y = Math.PI / 2;
           ring.position.set(0, railHeight, z + railZ);
           damperGroup.add(ring);
           set.push(ring);
         }
-        damperSets.push({ row, width: rowWidth, offsetX: rowOffsetX, meshes: set });
+        damperSets.push({ row, rail, width: rowWidth, offsetX: rowOffsetX, meshes: set });
       }
       const glow = new THREE.PointLight(0xff3fc8, 1.9, 8, 2);
       glow.position.set(rowOffsetX, 1.15, z);
@@ -1212,6 +1251,7 @@ export function WindScene({
         live.cameraView,
         live.selectedPanel.row,
         live.selectedPanel.module,
+        live.colorCodeMitigations,
       ].join("-");
       if (visualKey !== lastVisualKey) {
         sceneLabels.forEach((label) => {
@@ -1252,16 +1292,16 @@ export function WindScene({
         const screenHeight = live.config.screenHeightM;
         const activeScreenRows = new Set(getInstalledScreenRows(live.config));
         for (const screen of screenAssemblies) {
-          const screenCellHeight = screenHeight / screen.slats.length;
+          const screenCellHeight = screenHeight / screen.stripCount;
           const screenSolidHeight = screenCellHeight * (1 - live.config.screenPorosity / 100);
           screen.group.visible = activeScreenRows.has(screen.row);
           screen.posts.forEach((post) => {
             post.scale.y = screenHeight;
             post.position.y = screenHeight / 2;
           });
-          screen.slats.forEach((slat, index) => {
+          screen.slats.forEach((slat) => {
             slat.scale.y = Math.max(0.015, screenSolidHeight);
-            slat.position.y = (index + 0.5) * screenCellHeight;
+            slat.position.y = (slat.userData.strip + 0.5) * screenCellHeight;
           });
         }
 
@@ -1295,6 +1335,7 @@ export function WindScene({
             damper.position.x =
               set.offsetX - set.width / 2 + index * (set.width / Math.max(1, damperCount - 1));
             damper.scale.setScalar(damperScale);
+            damper.userData.element = set.rail * damperCount + index + 1;
           });
         }
         damperGlows.forEach((glow, index) => {
@@ -1303,25 +1344,55 @@ export function WindScene({
         });
 
         const activeDeviceLoad = live.result.mitigationLoad;
-        (Object.entries(deviceMaterials) as Array<[DeviceConcept, Map<number, THREE.MeshStandardMaterial>]>).forEach(([concept, materials]) => {
-          materials.forEach((material, row) => {
-            const rowLoad = activeDeviceLoad?.concept === concept
-              ? activeDeviceLoad.rows.find((item) => item.row === row)
-              : undefined;
-            const risk = rowLoad
-              ? live.viewMode === "pressure"
-                ? clamp(rowLoad.peakPressureKpa / 1.6, 0, 1)
-                : live.viewMode === "vibration"
-                  ? clamp(rowLoad.peakVibrationIndex / 100, 0, 1)
-                  : 0
-              : 0;
+        const activeElements = new Map(
+          activeDeviceLoad?.rows.flatMap((row) =>
+            row.elements.map((element) => [`${row.row}:${element.element}`, element] as const),
+          ) ?? [],
+        );
+        const loadColoringActive = live.colorCodeMitigations
+          && (live.viewMode === "pressure" || live.viewMode === "vibration")
+          && activeDeviceLoad !== null;
+        const applyDeviceColor = (
+          concept: DeviceConcept,
+          row: number,
+          element: number,
+          material: THREE.MeshStandardMaterial,
+        ) => {
+          const elementLoad = activeDeviceLoad?.concept === concept
+            ? activeElements.get(`${row}:${element}`)
+            : undefined;
+          if (!loadColoringActive || !elementLoad) {
             const baseColor = deviceBaseColors[concept];
-            const loadColor = new THREE.Color(riskColor(risk, 1));
-            material.color.copy(baseColor).lerp(loadColor, risk * 0.48);
-            material.emissive.copy(baseColor).lerp(loadColor, risk * 0.62).multiplyScalar(0.55);
-            material.emissiveIntensity = 1.15 + risk * 2.1;
+            material.color.copy(baseColor);
+            material.emissive.copy(baseColor).multiplyScalar(0.5);
+            material.emissiveIntensity = concept === "dampers" ? 2.4 : 1.35;
+            return;
+          }
+          const risk = live.viewMode === "pressure"
+            ? elementLoad.pressureKpa / Math.max(activeDeviceLoad.peakPressureKpa, 0.01)
+            : elementLoad.vibrationIndex / 100;
+          const loadColor = new THREE.Color().setHSL(
+            0.54 * (1 - clamp(risk, 0, 1)),
+            0.82,
+            0.46 + clamp(risk, 0, 1) * 0.08,
+          );
+          material.color.copy(loadColor);
+          material.emissive.copy(loadColor).multiplyScalar(0.62);
+          material.emissiveIntensity = 1.55;
+        };
+        for (const visual of deviceMaterialVisuals) {
+          applyDeviceColor(visual.concept, visual.row, visual.element, visual.material);
+        }
+        for (const set of damperSets) {
+          set.meshes.forEach((damper) => {
+            applyDeviceColor(
+              "dampers",
+              set.row,
+              damper.userData.element,
+              damper.material as THREE.MeshStandardMaterial,
+            );
           });
-        });
+        }
 
         Object.entries(mitigationGroups).forEach(([id, group]) => {
           group.visible = live.config.mitigation === id;
@@ -1519,6 +1590,10 @@ export function WindScene({
       groundTexture?.dispose();
       fieldTexture?.dispose();
       skyTexture?.dispose();
+      screenMaterial.dispose();
+      vaneMaterial.dispose();
+      spoilerMaterial.dispose();
+      damperMaterial.dispose();
       renderer.dispose();
       renderer.domElement.remove();
     };

@@ -87,6 +87,7 @@ export function WindLab() {
   const [damperDampingPercent, setDamperDampingPercent] = useState(5.5);
   const [damperStartRow, setDamperStartRow] = useState(1);
   const [damperEndRow, setDamperEndRow] = useState(2);
+  const [colorCodeMitigations, setColorCodeMitigations] = useState(true);
   const [viewMode, setViewMode] = useState<ViewMode>("flow");
   const [playing, setPlaying] = useState(true);
   const [showSceneLabels, setShowSceneLabels] = useState(true);
@@ -213,6 +214,7 @@ export function WindLab() {
     setDamperDampingPercent(5.5);
     setDamperStartRow(1);
     setDamperEndRow(Math.min(2, rowCount));
+    setColorCodeMitigations(true);
     setArrayState("restored");
     setViewMode("flow");
     setCamera("perspective");
@@ -327,6 +329,7 @@ export function WindLab() {
             cameraView={cameraView}
             cameraRequest={cameraRequest}
             selectedPanel={selectedPanel}
+            colorCodeMitigations={colorCodeMitigations}
             onSelectPanel={setSelectedPanel}
           />
 
@@ -338,10 +341,10 @@ export function WindLab() {
               <i />
               <span>
                 <strong>{MITIGATIONS[mitigation].label}</strong>
-                {viewMode === "pressure" && result.mitigationLoad
-                  ? `Load tint · ${result.mitigationLoad.peakPressureKpa.toFixed(2)} kPa device peak`
-                  : viewMode === "vibration" && result.mitigationLoad
-                    ? `Animated response · ${result.mitigationLoad.peakVibrationIndex.toFixed(0)} / 100 device peak`
+                {colorCodeMitigations && viewMode === "pressure" && result.mitigationLoad
+                  ? `Element colors · ${result.mitigationLoad.peakPressureKpa.toFixed(2)} kPa device peak`
+                  : colorCodeMitigations && viewMode === "vibration" && result.mitigationLoad
+                    ? `Element colors + motion · ${result.mitigationLoad.peakVibrationIndex.toFixed(0)} / 100 device peak`
                     : `Bright ${MITIGATIONS[mitigation].colorName} geometry in the model`}
               </span>
             </div>
@@ -497,6 +500,26 @@ export function WindLab() {
             })}
           </div>
           <p className="concept-note">{MITIGATIONS[mitigation].detail}</p>
+
+          <label className={`mitigation-color-toggle ${mitigation === "none" ? "disabled" : ""}`}>
+            <span>
+              <strong>Show color-coding on mitigation elements</strong>
+              <small>
+                {mitigation === "none"
+                  ? "Select a mitigation concept to view its element loads."
+                  : viewMode === "flow"
+                    ? "Pressure and vibration views use the panel heatmap scale."
+                    : `Each physical element shows its own ${viewMode} demand.`}
+              </small>
+            </span>
+            <input
+              type="checkbox"
+              checked={colorCodeMitigations}
+              disabled={mitigation === "none"}
+              onChange={(event) => setColorCodeMitigations(event.target.checked)}
+              aria-label="Show color-coding on mitigation elements"
+            />
+          </label>
 
           {mitigation !== "none" ? (
             <div

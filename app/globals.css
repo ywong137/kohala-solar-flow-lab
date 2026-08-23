@@ -495,6 +495,49 @@ a { color: inherit; text-decoration: none; }
 .mitigation-grid button.active span { color: #dff8ef; }
 .concept-note { min-height: 28px; margin: 8px 2px 0; color: #6e858b; font-size: 8px; line-height: 1.45; }
 
+.mitigation-color-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 8px;
+  padding: 8px 9px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: rgba(12, 25, 32, 0.72);
+  cursor: pointer;
+}
+.mitigation-color-toggle > span { display: flex; min-width: 0; flex-direction: column; gap: 2px; }
+.mitigation-color-toggle strong { color: #c8dadd; font-size: 8px; font-weight: 560; }
+.mitigation-color-toggle small { color: #60757b; font-size: 7px; line-height: 1.35; }
+.mitigation-color-toggle input {
+  position: relative;
+  flex: 0 0 auto;
+  width: 30px;
+  height: 16px;
+  margin: 0;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  appearance: none;
+  background: #14242b;
+  transition: background 140ms ease, border-color 140ms ease;
+}
+.mitigation-color-toggle input::after {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #698087;
+  content: "";
+  transition: transform 140ms ease, background 140ms ease;
+}
+.mitigation-color-toggle input:checked { border-color: rgba(125, 240, 197, 0.55); background: rgba(125, 240, 197, 0.2); }
+.mitigation-color-toggle input:checked::after { background: var(--green); box-shadow: 0 0 8px rgba(125, 240, 197, 0.65); transform: translateX(14px); }
+.mitigation-color-toggle.disabled { opacity: 0.48; cursor: default; }
+.mitigation-color-toggle input:disabled { cursor: default; }
+
 .mitigation-tuning {
   position: relative;
   margin-top: 8px;
