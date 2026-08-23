@@ -690,6 +690,13 @@ a { color: inherit; text-decoration: none; }
 .selected-values span:last-child { padding-right: 0; border-right: 0; }
 .selected-values small { color: #5e747a; font-size: 7px; }
 .selected-values strong { font-family: "SFMono-Regular", Consolas, monospace; font-size: 9px; font-weight: 520; }
+.selected-motion-value { display: flex; align-items: flex-end; justify-content: space-between; gap: 8px; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
+.selected-motion-value > span:first-child { display: flex; flex-direction: column; gap: 2px; }
+.selected-motion-value small,
+.selected-motion-note { color: #5e747a; font-size: 7px; }
+.selected-motion-value strong { font-family: "SFMono-Regular", Consolas, monospace; font-size: 9px; font-weight: 520; }
+.selected-motion-value > span:last-child { color: #9c9364; font-family: "SFMono-Regular", Consolas, monospace; font-size: 7px; white-space: nowrap; }
+.selected-motion-note { margin: 6px 0 0; line-height: 1.4; }
 .assumption-link { display: flex; align-items: center; gap: 6px; margin-top: 9px; padding: 0 2px; color: #5f747a; background: transparent; font-size: 8px; }
 .assumption-link:hover { color: var(--blue); }
 

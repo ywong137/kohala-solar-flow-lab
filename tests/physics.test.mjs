@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   SCENARIOS,
   getArrayBounds,
+  getPanelVisualMotion,
   getRowOffsetX,
   getRowWidth,
   getRetainingWallClearance,
@@ -15,6 +16,7 @@ import {
   getSiteTerrainHeight,
   getScreenGeometry,
   resolveSiteFlowBoundary,
+  riskColor,
   simulate,
 } from "../app/lib/physics.ts";
 import { DEFAULT_ARRAY_CONFIG, cloneArrayConfig, getArrayMetrics } from "../app/lib/array-config.ts";
@@ -52,6 +54,13 @@ test("continues one southeast endpoint line through both half rows", () => {
     assert.ok(Math.abs(getRetainingWallClearance(rightEdge(row), getRowCenterZ(row, DEFAULT_ARRAY_CONFIG)) - 3) < 0.001);
   }
   assert.ok(Math.abs(edgeLine.bearingDeg - 53.5) < 0.2);
+});
+
+test("turns yellow at 26 vibration and reports the displayed panel travel", () => {
+  assert.equal(riskColor(26), "#e9ef72");
+  const motion = getPanelVisualMotion(26, DEFAULT_ARRAY_CONFIG);
+  assert.ok(Math.abs(motion.peakToPeakMm - 5.6) < 0.1);
+  assert.ok(Math.abs(motion.panelLengthPercent - 0.286) < 0.005);
 });
 
 test("routes site flow over the hill and retaining wall", () => {

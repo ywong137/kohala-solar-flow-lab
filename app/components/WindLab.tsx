@@ -42,6 +42,7 @@ import {
   SCENARIOS,
   cardinalDirection,
   getPanelResult,
+  getPanelVisualMotion,
   getSoutheastEdgeLine,
   riskColor,
   simulate,
@@ -175,6 +176,7 @@ export function WindLab() {
   );
   const result = useMemo(() => simulate(config), [config]);
   const selectedResult = getPanelResult(result, selectedPanel.row, selectedPanel.module);
+  const selectedVisualMotion = getPanelVisualMotion(selectedResult.vibrationIndex, geometry);
   const baselineResult = useMemo(() => simulate({ ...config, mitigation: "none" }), [config]);
   const comparisons = useMemo(
     () => mitigationOrder.map((id) => ({ id, result: simulate({ ...config, mitigation: id }) })),
@@ -770,6 +772,14 @@ export function WindLab() {
               <span><small>Turbulence</small><strong>{selectedResult.turbulencePercent.toFixed(0)}%</strong></span>
               <span><small>Vibration</small><strong>{selectedResult.vibrationIndex.toFixed(0)} / 100</strong></span>
             </div>
+            <div className="selected-motion-value">
+              <span>
+                <small>Visual edge travel</small>
+                <strong>{selectedVisualMotion.peakToPeakMm.toFixed(1)} mm peak-to-peak</strong>
+              </span>
+              <span>{selectedVisualMotion.panelLengthPercent.toFixed(2)}% of panel length</span>
+            </div>
+            <p className="selected-motion-note">Visual scale only. The vibration index is a load-response score, not measured displacement.</p>
           </div>
 
           <button className="assumption-link" onClick={() => setShowAssumptions(true)}>
@@ -877,7 +887,7 @@ export function WindLab() {
               <article><span>01</span><h3>Saved geometry</h3><p>The configuration page controls panel counts, row offsets, spacing, panel dimensions, tilt, clearance, bearings, and rack assumptions.</p></article>
               <article><span>07</span><h3>Staggered row layout</h3><p>The rows use individual horizontal offsets. Row centers use a {geometry.rowSpacingM.toFixed(2)} m pitch.</p></article>
               <article><span>02</span><h3>Panel flow field</h3><p>The solver evaluates all {geometryMetrics.totalPanelCount} panels. It tracks angled wake overlap, exposed columns, row offset, screen shelter, and wake decay.</p></article>
-              <article><span>03</span><h3>Local vibration</h3><p>Each panel uses its local turbulence and pressure. Dampers change only the fitted rows. This model is not full CFD.</p></article>
+              <article><span>03</span><h3>Local vibration</h3><p>Each panel uses its local turbulence, pressure, damping, and resonance response. The displayed travel follows the animation scale, not measured displacement.</p></article>
               <article><span>04</span><h3>Array totals</h3><p>The saved layout has {geometryMetrics.totalPanelCount} panels. It has {geometryMetrics.panelCounts.slice(2).reduce((sum, count) => sum + count, 0)} after Rows 1 and 2 are removed.</p></article>
               <article><span>05</span><h3>Estimated rack and site</h3><p>The rack uses a {geometryMetrics.tableChordM.toFixed(2)} m maximum slope and {geometry.lowEdgeClearanceM.toFixed(2)}–{geometryMetrics.highEdgeClearanceM.toFixed(2)} m clearance. The straight retaining wall follows the {southeastEdge.bearingDeg.toFixed(0)}° endpoint line at 3 m perpendicular clearance. Its top rises at the center.</p></article>
               <article><span>08</span><h3>Research-based dynamics</h3><p>The defaults use the low end of field tests on a tracking PV rack: 2.9 Hz torsional frequency and 1.1% damping. This fixed rack still needs a site modal test.</p></article>

@@ -444,6 +444,15 @@ export type SimulationResult = {
 };
 
 export const MITIGATION_BASE_COLOR = "#ff66d8";
+export const PANEL_VISUAL_ROTATION_RAD_PER_INDEX = 0.00011;
+
+const RISK_COLOR_STOPS = [
+  { at: 0, color: [105, 217, 255] },
+  { at: 0.26, color: [233, 239, 114] },
+  { at: 0.58, color: [255, 171, 93] },
+  { at: 0.82, color: [255, 95, 98] },
+  { at: 1, color: [255, 63, 95] },
+] as const;
 
 export const MITIGATIONS: Record<MitigationId, { label: string; short: string; detail: string; color: string; colorName: string }> = {
   none: { label: "Baseline array", short: "No intervention", detail: "Current open-rack geometry with no added flow control.", color: "#8fa4aa", colorName: "gray" },
@@ -1017,8 +1026,27 @@ export function simulate(config: SimulationConfig): SimulationResult {
 
 export function riskColor(value: number, max = 100) {
   const t = clamp(value / Math.max(max, 0.001), 0, 1);
-  if (t < 0.45) return "#69d9ff";
-  if (t < 0.7) return "#e9ef72";
-  if (t < 0.88) return "#ffab5d";
-  return "#ff5f62";
+  const upperIndex = RISK_COLOR_STOPS.findIndex((stop) => t <= stop.at);
+  if (upperIndex <= 0) return "#69d9ff";
+  const lower = RISK_COLOR_STOPS[upperIndex - 1];
+  const upper = RISK_COLOR_STOPS[upperIndex];
+  const blend = (t - lower.at) / Math.max(0.001, upper.at - lower.at);
+  const channels = lower.color.map((channel, index) =>
+    Math.round(channel + (upper.color[index] - channel) * blend),
+  );
+  return `#${channels.map((channel) => channel.toString(16).padStart(2, "0")).join("")}`;
+}
+
+export function getPanelVisualMotion(
+  vibrationIndex: number,
+  geometry = DEFAULT_ARRAY_CONFIG,
+) {
+  const rotationAmplitudeRad = clamp(vibrationIndex, 0, 100)
+    * PANEL_VISUAL_ROTATION_RAD_PER_INDEX;
+  const peakToPeakM = geometry.panelLengthM * Math.sin(rotationAmplitudeRad);
+  return {
+    peakToPeakMm: peakToPeakM * 1000,
+    panelLengthPercent: peakToPeakM / geometry.panelLengthM * 100,
+    rotationAmplitudeDeg: rotationAmplitudeRad / RAD,
+  };
 }

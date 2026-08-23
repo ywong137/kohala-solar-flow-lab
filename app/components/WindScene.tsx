@@ -7,10 +7,12 @@ import { getArrayMetrics } from "../lib/array-config";
 import {
   MITIGATION_BASE_COLOR,
   MITIGATIONS,
+  PANEL_VISUAL_ROTATION_RAD_PER_INDEX,
   getArrayBounds,
   getFlowComponents,
   getInstalledScreenRows,
   getPanelResult,
+  riskColor,
   getRetainingWallX,
   getRowCenterZ,
   getRowOffsetX,
@@ -1260,7 +1262,9 @@ export function WindScene({
             : live.viewMode === "vibration"
               ? panelResult.vibrationIndex / 100
               : 0.12;
-          const color = new THREE.Color().setHSL(0.54 * (1 - clamp(risk, 0, 1)), 0.82, 0.43 + risk * 0.08);
+          const color = live.viewMode === "flow"
+            ? new THREE.Color().setHSL(0.54 * (1 - risk), 0.82, 0.43 + risk * 0.08)
+            : new THREE.Color(riskColor(risk * 100));
           panel.glass.material.color.copy(color);
           panel.glass.material.emissive.copy(selected ? new THREE.Color(0xffd84f) : color.clone().multiplyScalar(0.19));
           panel.glass.material.emissiveIntensity = selected ? 2.1 : live.viewMode === "flow" ? 0.32 : 0.66;
@@ -1363,11 +1367,7 @@ export function WindScene({
           const risk = live.viewMode === "pressure"
             ? elementLoad.pressureKpa / Math.max(activeDeviceLoad.peakPressureKpa, 0.01)
             : elementLoad.vibrationIndex / 100;
-          const loadColor = new THREE.Color().setHSL(
-            0.54 * (1 - clamp(risk, 0, 1)),
-            0.82,
-            0.46 + clamp(risk, 0, 1) * 0.08,
-          );
+          const loadColor = new THREE.Color(riskColor(risk * 100));
           material.color.copy(loadColor);
           material.emissive.copy(loadColor).multiplyScalar(0.62);
           material.emissiveIntensity = 1.55;
@@ -1591,7 +1591,9 @@ export function WindScene({
       selectionMaterial.opacity = 0.86 + Math.sin(elapsed * 3.2) * 0.1;
       for (const panel of panelVisuals) {
         const panelResult = getPanelResult(live.result, panel.row, panel.module);
-        const amplitude = vibrationScale * panelResult.vibrationIndex * 0.00011;
+        const amplitude = vibrationScale
+          * panelResult.vibrationIndex
+          * PANEL_VISUAL_ROTATION_RAD_PER_INDEX;
         const phase = panel.module * 0.31 + panel.row * 0.72;
         panel.assembly.rotation.x = panel.baseRotationX + Math.sin(elapsed * Math.PI * 4 + phase) * amplitude;
         panel.assembly.rotation.z = Math.cos(elapsed * Math.PI * 4.4 + phase) * amplitude * 0.62;
