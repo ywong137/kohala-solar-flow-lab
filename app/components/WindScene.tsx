@@ -60,6 +60,62 @@ type FlowSample = {
 };
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
+
+// Hand-traced outer gravel boundary from the north-up 1378 × 1046 satellite image.
+// The affine calibration uses the seven photographed row centers and their saved site coordinates.
+const SATELLITE_GRAVEL_PIXEL_OUTLINE = [
+  [851, 642],
+  [810, 600],
+  [792, 596],
+  [752, 578],
+  [740, 567],
+  [701, 556],
+  [681, 561],
+  [667, 559],
+  [659, 555],
+  [655, 556],
+  [642, 565],
+  [631, 569],
+  [621, 579],
+  [616, 581],
+  [611, 591],
+  [586, 616],
+  [574, 631],
+  [545, 689],
+  [535, 749],
+  [549, 788],
+  [574, 809],
+  [587, 817],
+  [612, 815],
+  [621, 810],
+  [636, 808],
+  [671, 789],
+  [683, 778],
+  [702, 772],
+  [865, 682],
+  [867, 677],
+] as const;
+
+const SATELLITE_SITE_AFFINE = {
+  xToPixelX: 3.77581121,
+  zToPixelX: -3.23715279,
+  xToPixelY: 3.23079084,
+  zToPixelY: 3.82954774,
+  originPixelX: 676.12,
+  originPixelY: 661.4,
+};
+
+function satellitePixelToSite(pixelX: number, pixelY: number) {
+  const affine = SATELLITE_SITE_AFFINE;
+  const shiftedX = pixelX - affine.originPixelX;
+  const shiftedY = pixelY - affine.originPixelY;
+  const determinant = affine.xToPixelX * affine.zToPixelY - affine.zToPixelX * affine.xToPixelY;
+  return new THREE.Vector2(
+    (shiftedX * affine.zToPixelY - affine.zToPixelX * shiftedY) / determinant,
+    (affine.xToPixelX * shiftedY - shiftedX * affine.xToPixelY) / determinant,
+  );
+}
+
 const approximateGaussian = () =>
   (Math.random() + Math.random() + Math.random() + Math.random() - 2) * 1.73;
 const hash = (value: number) => {
@@ -401,47 +457,26 @@ export function WindScene({
     field.receiveShadow = true;
     scene.add(field);
 
-    const gravelSegments = 64;
     const gravelPositions: number[] = [];
     const gravelUvs: number[] = [];
     const gravelIndices: number[] = [];
-    const rowLeftEdges = geometry.rows.map((_, index) =>
-      getRowOffsetX(index + 1, geometry) - getRowWidth(index + 1, geometry) / 2,
+    const gravelOutline = SATELLITE_GRAVEL_PIXEL_OUTLINE.map(([pixelX, pixelY]) =>
+      satellitePixelToSite(pixelX, pixelY),
     );
-    const gravelLeftControls = [
-      { z: gravelMinZ, x: rowLeftEdges[rowCount - 1] - 3.8 },
-      ...geometry.rows.map((_, index) => ({
-        z: getRowCenterZ(index + 1, geometry),
-        x: rowLeftEdges[index] - 4.2,
-      })),
-      { z: gravelMaxZ, x: rowLeftEdges[0] - 3.8 },
-    ].sort((a, b) => a.z - b.z);
-    const gravelLeftXAt = (z: number) => {
-      const upperIndex = gravelLeftControls.findIndex((point) => point.z >= z);
-      if (upperIndex <= 0) return gravelLeftControls[0].x;
-      if (upperIndex < 0) return gravelLeftControls[gravelLeftControls.length - 1].x;
-      const lower = gravelLeftControls[upperIndex - 1];
-      const upper = gravelLeftControls[upperIndex];
-      const progress = (z - lower.z) / Math.max(0.001, upper.z - lower.z);
-      return THREE.MathUtils.lerp(lower.x, upper.x, progress);
-    };
-    const gravelOutline: THREE.Vector2[] = [];
-    for (let segment = 0; segment <= gravelSegments; segment += 1) {
-      const z = gravelMinZ + (segment / gravelSegments) * gravelDepth;
-      gravelOutline.push(new THREE.Vector2(gravelLeftXAt(z), z));
-    }
-    for (let segment = gravelSegments; segment >= 0; segment -= 1) {
-      const z = gravelMinZ + (segment / gravelSegments) * gravelDepth;
-      gravelOutline.push(new THREE.Vector2(wallXAt(z) + 0.75, z));
+    // Keep the photographed wall-side vertices beneath the rendered wall.
+    for (const index of [0, ...Array.from({ length: 6 }, (_, offset) => 24 + offset)]) {
+      gravelOutline[index].x = wallXAt(gravelOutline[index].y) + 0.75;
     }
     const gravelFaces = THREE.ShapeUtils.triangulateShape(gravelOutline, []);
     const gravelBoundsMinX = Math.min(...gravelOutline.map((point) => point.x));
     const gravelBoundsMaxX = Math.max(...gravelOutline.map((point) => point.x));
+    const gravelBoundsMinZ = Math.min(...gravelOutline.map((point) => point.y));
+    const gravelBoundsMaxZ = Math.max(...gravelOutline.map((point) => point.y));
     gravelOutline.forEach((point) => {
       gravelPositions.push(point.x, -0.025, point.y);
       gravelUvs.push(
         (point.x - gravelBoundsMinX) / Math.max(0.001, gravelBoundsMaxX - gravelBoundsMinX),
-        (point.y - gravelMinZ) / gravelDepth,
+        (point.y - gravelBoundsMinZ) / Math.max(0.001, gravelBoundsMaxZ - gravelBoundsMinZ),
       );
     });
     // ShapeUtils triangulates in XY. Reverse each face after mapping Y to world Z.
