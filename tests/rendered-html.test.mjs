@@ -32,6 +32,9 @@ test("server-renders the completed wind lab", async () => {
   assert.match(html, /KOHALA FLOW LAB/);
   assert.match(html, /Post-storm cleanup/);
   assert.match(html, /Fully restored array/);
+  assert.match(html, /aria-label="Hide floating labels"/);
+  assert.match(html, /aria-pressed="true"/);
+  assert.match(html, /class="slider-marker-tick"/);
   assert.doesNotMatch(html, /Immediate damage/i);
 });
 

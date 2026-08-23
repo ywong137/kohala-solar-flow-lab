@@ -31,6 +31,7 @@ type WindSceneProps = {
   viewMode: ViewMode;
   playing: boolean;
   arrayState: ArrayState;
+  showSceneLabels: boolean;
   cameraView: "perspective" | "mauka" | "makai" | "plan";
   cameraRequest: number;
   selectedPanel: SelectedPanel;
@@ -297,6 +298,7 @@ export function WindScene({
   viewMode,
   playing,
   arrayState,
+  showSceneLabels,
   cameraView,
   cameraRequest,
   selectedPanel,
@@ -310,6 +312,7 @@ export function WindScene({
     viewMode,
     playing,
     arrayState,
+    showSceneLabels,
     cameraView,
     cameraRequest,
     selectedPanel,
@@ -323,12 +326,13 @@ export function WindScene({
       viewMode,
       playing,
       arrayState,
+      showSceneLabels,
       cameraView,
       cameraRequest,
       selectedPanel,
       onSelectPanel,
     };
-  }, [config, result, viewMode, playing, arrayState, cameraView, cameraRequest, selectedPanel, onSelectPanel]);
+  }, [config, result, viewMode, playing, arrayState, showSceneLabels, cameraView, cameraRequest, selectedPanel, onSelectPanel]);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -603,6 +607,7 @@ export function WindScene({
     const panelVisuals: PanelVisual[] = [];
     const rackVisuals: RackVisual[] = [];
     const clickablePanels: THREE.Object3D[] = [];
+    const sceneLabels: THREE.Sprite[] = [];
     const panelTexture = makePanelTexture(renderer);
     const frameMaterial = new THREE.MeshStandardMaterial({ color: 0xb8c0be, metalness: 0.7, roughness: 0.32 });
     const rackMaterial = new THREE.MeshStandardMaterial({ color: 0xaeb9b7, metalness: 0.68, roughness: 0.38 });
@@ -709,14 +714,17 @@ export function WindScene({
       label.position.set(rowOffsetX - rowWidth / 2 - 3.35, 1.15, z);
       label.scale.set(4.9, 1.22, 1);
       arrayGroup.add(label);
+      sceneLabels.push(label);
     }
 
     const maukaLabel = makeTextSprite("MAUKA · NE · UPWIND", "accent");
     maukaLabel.position.set(arrayCenterX, 1.8, -sceneDepth / 2 + 4);
     scene.add(maukaLabel);
+    sceneLabels.push(maukaLabel);
     const makaiLabel = makeTextSprite("MAKAI · SW · DOWNWIND");
     makaiLabel.position.set(arrayCenterX, 1.8, sceneDepth / 2 - 4);
     scene.add(makaiLabel);
+    sceneLabels.push(makaiLabel);
 
     const selectionMaterial = new THREE.MeshBasicMaterial({
       color: 0xffe76a,
@@ -1174,11 +1182,15 @@ export function WindScene({
         live.config.damperDampingPercent,
         live.config.damperStartRow,
         live.config.damperEndRow,
+        live.showSceneLabels,
         live.cameraView,
         live.selectedPanel.row,
         live.selectedPanel.module,
       ].join("-");
       if (visualKey !== lastVisualKey) {
+        sceneLabels.forEach((label) => {
+          label.visible = live.showSceneLabels;
+        });
         const maxPressure = Math.max(...live.result.rows.map((row) => row.peakUpliftKpa), 0.01);
         let activePanel: PanelVisual | null = null;
         for (const panel of panelVisuals) {

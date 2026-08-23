@@ -22,6 +22,7 @@ import {
   Shield,
   SlidersHorizontal,
   Sparkles,
+  Tag,
   Volume2,
   VolumeX,
   Wind,
@@ -87,6 +88,7 @@ export function WindLab() {
   const [damperEndRow, setDamperEndRow] = useState(2);
   const [viewMode, setViewMode] = useState<ViewMode>("flow");
   const [playing, setPlaying] = useState(true);
+  const [showSceneLabels, setShowSceneLabels] = useState(true);
   const [arrayState, setArrayState] = useState<ArrayState>("restored");
   const [cameraView, setCameraView] = useState<"perspective" | "mauka" | "makai" | "plan">("perspective");
   const [cameraRequest, setCameraRequest] = useState(0);
@@ -290,6 +292,16 @@ export function WindLab() {
                   {label}
                 </button>
               ))}
+              <button
+                className={`icon-button ${showSceneLabels ? "active" : ""}`}
+                type="button"
+                onClick={() => setShowSceneLabels((value) => !value)}
+                aria-label={showSceneLabels ? "Hide floating labels" : "Show floating labels"}
+                aria-pressed={showSceneLabels}
+                title={showSceneLabels ? "Hide floating labels" : "Show floating labels"}
+              >
+                <Tag size={14} />
+              </button>
               <button className="icon-button" onClick={() => setPlaying((value) => !value)} aria-label={playing ? "Pause airflow" : "Play airflow"}>
                 {playing ? <Pause size={14} /> : <Play size={14} />}
               </button>
@@ -310,6 +322,7 @@ export function WindLab() {
             viewMode={viewMode}
             playing={playing}
             arrayState={arrayState}
+            showSceneLabels={showSceneLabels}
             cameraView={cameraView}
             cameraRequest={cameraRequest}
             selectedPanel={selectedPanel}
@@ -422,9 +435,7 @@ export function WindLab() {
             unit="mph"
             onChange={setWindSpeedMph}
             accent="#7df0c5"
-            markers={[{ value: SCENARIOS[scenario].windSpeedMph, label: `${SCENARIOS[scenario].label}: ${SCENARIOS[scenario].windSpeedMph} mph`, key: scenario }]}
-            snapValue={SCENARIOS[scenario].windSpeedMph}
-            snapTolerance={3}
+            markers={[{ value: SCENARIOS[scenario].windSpeedMph, label: `${SCENARIOS[scenario].label}: ${SCENARIOS[scenario].windSpeedMph} mph`, key: scenario, style: "tick" }]}
           />
           <ControlSlider
             label="Wind bearing"
@@ -989,7 +1000,7 @@ function ControlSlider({
   onChange: (value: number) => void;
   accent: string;
   compact?: boolean;
-  markers?: Array<{ value: number; label: string; key?: string }>;
+  markers?: Array<{ value: number; label: string; key?: string; style?: "dot" | "tick" }>;
   snapValue?: number;
   snapTolerance?: number;
 }) {
@@ -1017,6 +1028,7 @@ function ControlSlider({
           {markers.map((marker, index) => (
             <button
               type="button"
+              className={marker.style === "tick" ? "slider-marker-tick" : undefined}
               key={`${marker.key ?? marker.value}-${index}`}
               style={{ left: `${Math.min(100, Math.max(0, ((marker.value - min) / (max - min)) * 100))}%` }}
               onClick={() => onChange(marker.value)}

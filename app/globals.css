@@ -453,6 +453,18 @@ a { color: inherit; text-decoration: none; }
 }
 .slider-markers button:hover,
 .range-default-marker:hover { background: var(--slider-accent, var(--green)); }
+.slider-markers .slider-marker-tick {
+  width: 9px;
+  height: 9px;
+  border: 0;
+  border-radius: 0;
+  background: linear-gradient(90deg, transparent 4px, #d9e8e9 4px 5px, transparent 5px);
+  box-shadow: none;
+  transform: translateX(-50%);
+}
+.slider-markers .slider-marker-tick:hover {
+  background: linear-gradient(90deg, transparent 4px, var(--slider-accent, var(--green)) 4px 5px, transparent 5px);
+}
 
 .range-labels { display: flex; justify-content: space-between; margin-top: 5px; color: #465a60; font-size: 6px; }
 .section-rule { height: 1px; margin: 17px 0 15px; background: linear-gradient(90deg, var(--line), transparent); }
