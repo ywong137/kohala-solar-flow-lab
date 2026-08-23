@@ -47,6 +47,7 @@ type PanelVisual = {
   immediateRotation: THREE.Euler;
   immediateDamaged: boolean;
   immediatePresent: boolean;
+  immediateState: ImmediatePanelState;
   crack?: THREE.Mesh;
 };
 
@@ -63,22 +64,66 @@ type FlowSample = {
   turbulence: number;
 };
 
-type ImmediatePanelState = "intact" | "attached" | "displaced" | "missing";
+type ImmediatePanelState = "intact" | "attached" | "rack" | "upright" | "gravel" | "downhill" | "missing";
 
-const PHOTO_DAMAGE_INVENTORY: Record<1 | 2, { attached: Set<number>; displaced: Set<number> }> = {
-  1: {
-    attached: new Set([1, 2, 3, 6, 7, 10, 11, 15, 16, 17, 20, 21]),
-    displaced: new Set([13, 14, 23, 24, 27, 28]),
-  },
-  2: {
-    attached: new Set([1, 2, 3, 4, 5, 9, 10, 11, 12, 15, 16, 17, 18, 21, 22, 23, 24, 27, 28, 29, 30, 33, 34, 35]),
-    displaced: new Set([36, 40, 41, 42, 43, 46, 47, 48, 49, 52, 53, 54, 56]),
-  },
+type PhotoDamageSymbol = "A" | "R" | "U" | "G" | "D" | "M";
+
+// Each string is one portrait-module lane, ordered from the northwest end to the southeast wall.
+// Row 1 starts at the array midpoint because the saved geometry right-aligns its 14 columns.
+const PHOTO_DAMAGE_LAYOUT: Record<1 | 2, readonly [string, string]> = {
+  1: [
+    "MMMMMAAAAUUUUR",
+    "MMMMMAAAAAADDD",
+  ],
+  2: [
+    "AAAAAAAARRMMMMAAAAGGMMMMRRDM",
+    "AAAAAAAAAARRMMMMMAAGGRMMMDMM",
+  ],
 };
 
-const PHOTO_DAMAGE_DOWNHILL = new Set(["1:14", "1:24", "1:28", "2:40", "2:46", "2:47", "2:52", "2:53", "2:56"]);
-const PHOTO_DAMAGE_UPRIGHT = new Set(["1:13", "2:41", "2:42", "2:43"]);
-const PHOTO_DAMAGE_FOLDED = new Set(["1:23", "1:27", "2:48", "2:49", "2:54"]);
+const PHOTO_DAMAGE_SYMBOL_STATE: Record<PhotoDamageSymbol, Exclude<ImmediatePanelState, "intact">> = {
+  A: "attached",
+  R: "rack",
+  U: "upright",
+  G: "gravel",
+  D: "downhill",
+  M: "missing",
+};
+
+type PhotoDamagePose = {
+  x: number;
+  z: number;
+  height: number;
+  pitchDeg: number;
+  yawDeg: number;
+  rollDeg: number;
+  terrain: boolean;
+};
+
+// These poses trace the loose-panel groups across the front, front-right, corner, and makai photos.
+const PHOTO_DAMAGE_POSES: Record<string, PhotoDamagePose> = {
+  "1:10": { x: 4.35, z: 20.05, height: 0.96, pitchDeg: 82, yawDeg: -8, rollDeg: -4, terrain: false },
+  "1:11": { x: 5.45, z: 20.28, height: 0.96, pitchDeg: 85, yawDeg: -3, rollDeg: 3, terrain: false },
+  "1:12": { x: 6.55, z: 20.16, height: 0.96, pitchDeg: 81, yawDeg: 4, rollDeg: -2, terrain: false },
+  "1:13": { x: 7.65, z: 20.42, height: 0.96, pitchDeg: 84, yawDeg: 9, rollDeg: 5, terrain: false },
+  "1:14": { x: 9.45, z: 19.55, height: 0.72, pitchDeg: 24, yawDeg: -14, rollDeg: 5, terrain: false },
+  "1:26": { x: -20.6, z: 31.4, height: 0.08, pitchDeg: 3, yawDeg: -31, rollDeg: 2, terrain: true },
+  "1:27": { x: -14.7, z: 33.2, height: 0.08, pitchDeg: 5, yawDeg: 19, rollDeg: -3, terrain: true },
+  "1:28": { x: -8.5, z: 35.1, height: 0.08, pitchDeg: 2, yawDeg: -9, rollDeg: 1, terrain: true },
+  "2:9": { x: -8.05, z: 12.2, height: 1.05, pitchDeg: 38, yawDeg: -7, rollDeg: 5, terrain: false },
+  "2:10": { x: -6.95, z: 12.45, height: 0.92, pitchDeg: 24, yawDeg: 4, rollDeg: -3, terrain: false },
+  "2:19": { x: -10.9, z: 25.1, height: 0.08, pitchDeg: 2, yawDeg: 11, rollDeg: -1, terrain: false },
+  "2:20": { x: -4.7, z: 26.15, height: 0.08, pitchDeg: 4, yawDeg: -18, rollDeg: 2, terrain: false },
+  "2:25": { x: 7.85, z: 12.55, height: 0.95, pitchDeg: 32, yawDeg: -11, rollDeg: 4, terrain: false },
+  "2:26": { x: 9.05, z: 12.82, height: 0.75, pitchDeg: 22, yawDeg: 8, rollDeg: -4, terrain: false },
+  "2:27": { x: -2.4, z: 30.25, height: 0.08, pitchDeg: 3, yawDeg: 27, rollDeg: 2, terrain: true },
+  "2:39": { x: -5.25, z: 14.25, height: 0.44, pitchDeg: 18, yawDeg: -5, rollDeg: -5, terrain: false },
+  "2:40": { x: -3.95, z: 14.55, height: 0.32, pitchDeg: 7, yawDeg: 13, rollDeg: 4, terrain: false },
+  "2:48": { x: 1.25, z: 25.55, height: 0.08, pitchDeg: 3, yawDeg: 24, rollDeg: -2, terrain: false },
+  "2:49": { x: 7.85, z: 24.65, height: 0.08, pitchDeg: 5, yawDeg: -12, rollDeg: 1, terrain: false },
+  "2:50": { x: 6.75, z: 14.35, height: 0.42, pitchDeg: 20, yawDeg: -9, rollDeg: 3, terrain: false },
+  "2:54": { x: 5.45, z: 32.25, height: 0.08, pitchDeg: 4, yawDeg: -23, rollDeg: -2, terrain: true },
+};
 
 function getImmediatePanelState(
   row: number,
@@ -89,20 +134,20 @@ function getImmediatePanelState(
   if (row > 2) return "intact";
   const isPhotoDefault = panelsDeep === 2 && ((row === 1 && columns === 14) || (row === 2 && columns === 28));
   if (isPhotoDefault) {
-    const inventory = PHOTO_DAMAGE_INVENTORY[row as 1 | 2];
-    if (inventory.attached.has(module)) return "attached";
-    if (inventory.displaced.has(module)) return "displaced";
-    return "missing";
+    const depthIndex = Math.floor((module - 1) / columns);
+    const columnIndex = (module - 1) % columns;
+    const symbol = PHOTO_DAMAGE_LAYOUT[row as 1 | 2][depthIndex]?.[columnIndex] as PhotoDamageSymbol | undefined;
+    return symbol ? PHOTO_DAMAGE_SYMBOL_STATE[symbol] : "missing";
   }
 
   const presentRatio = row === 1 ? 18 / 28 : 37 / 56;
-  const attachedRatio = row === 1 ? 12 / 18 : 24 / 37;
+  const attachedRatio = row === 1 ? 10 / 18 : 24 / 37;
   if (hash(row * 1000 + module) > presentRatio) return "missing";
-  return hash(row * 2000 + module) < attachedRatio ? "attached" : "displaced";
+  return hash(row * 2000 + module) < attachedRatio ? "attached" : "rack";
 }
 
 function getImmediateInventory(rows: Array<{ columns: number; panelsDeep: number }>) {
-  const counts = { attached: 0, displaced: 0, missing: 0 };
+  const counts = { attached: 0, rack: 0, upright: 0, gravel: 0, downhill: 0, missing: 0 };
   rows.slice(0, 2).forEach((row, rowIndex) => {
     const rowNumber = rowIndex + 1;
     for (let moduleNumber = 1; moduleNumber <= row.columns * row.panelsDeep; moduleNumber += 1) {
@@ -110,7 +155,13 @@ function getImmediateInventory(rows: Array<{ columns: number; panelsDeep: number
       if (state !== "intact") counts[state] += 1;
     }
   });
-  return { ...counts, visible: counts.attached + counts.displaced };
+  const displaced = counts.rack + counts.upright + counts.gravel + counts.downhill;
+  return {
+    ...counts,
+    displaced,
+    ground: counts.gravel + counts.downhill,
+    visible: counts.attached + displaced,
+  };
 }
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
@@ -406,13 +457,12 @@ export function WindScene({
     const wallMaxZ = gravelCenterZ + wallDepth / 2;
     const retainedHillWidth = 84;
     const wallProgressAt = (z: number) => clamp((z - wallMinZ) / wallDepth, 0, 1);
-    const wallXAt = (z: number) => wallBaseX + Math.sin(wallProgressAt(z) * Math.PI) * 1.1;
     const wallTopHeightAt = (z: number) => {
       const arch = Math.sin(wallProgressAt(z) * Math.PI);
-      return 0.58 + Math.pow(Math.max(0, arch), 0.82) * 0.56;
+      return 0.42 + Math.pow(Math.max(0, arch), 0.72) * 1.08;
     };
     const retainedHillHeightAt = (x: number, z: number) => {
-      const localWallX = wallXAt(z);
+      const localWallX = wallBaseX;
       const crossProgress = clamp((x - localWallX) / retainedHillWidth, 0, 1);
       const rearProgress = clamp((wallMaxZ - z) / wallDepth, 0, 1);
       const roundedRise = Math.sin(crossProgress * Math.PI) * (1.25 + rearProgress * 0.48);
@@ -425,7 +475,7 @@ export function WindScene({
       const makaiDrop = Math.max(0, z - gravelMaxZ) * 0.055;
       const maukaRise = Math.max(0, gravelMinZ - z) * 0.006;
       const lowerSlope = -0.08 - leftDrop - makaiDrop + maukaRise;
-      if (x <= wallXAt(z)) return lowerSlope;
+      if (x <= wallBaseX) return lowerSlope;
 
       const endDistance = z < wallMinZ ? wallMinZ - z : z > wallMaxZ ? z - wallMaxZ : 0;
       const wallInfluence = Math.exp(-Math.pow(endDistance / 15, 2));
@@ -460,7 +510,7 @@ export function WindScene({
     for (let segment = 0; segment <= gravelSegments; segment += 1) {
       const progress = segment / gravelSegments;
       const z = gravelMinZ + progress * gravelDepth;
-      const rightX = wallXAt(z);
+      const rightX = wallBaseX;
       gravelPositions.push(gravelMinX, -0.035, z, rightX, -0.035, z);
       gravelUvs.push(0, progress, 1, progress);
       if (segment < gravelSegments) {
@@ -493,7 +543,7 @@ export function WindScene({
     for (let segment = 0; segment <= gravelSegments; segment += 1) {
       const progress = segment / gravelSegments;
       const z = wallMinZ + progress * wallDepth;
-      const edgeX = wallXAt(z);
+      const edgeX = wallBaseX;
       hillApronPositions.push(
         edgeX + 0.12, wallTopHeightAt(z) + 0.015, z,
         edgeX + 3.2, retainedHillHeightAt(edgeX + 3.2, z) + 0.015, z,
@@ -568,7 +618,7 @@ export function WindScene({
       const { column, layer, layers, z } = wallStoneData[index];
       const top = wallTopHeightAt(z);
       stone.position.set(
-        wallXAt(z) + (hash(index + 900) - 0.5) * 0.58,
+        wallBaseX + (hash(index + 900) - 0.5) * 0.58,
         (layer + 0.52) * (top / layers) + hash(index + 930) * 0.035,
         z + (hash(index + 960) - 0.5) * 0.22,
       );
@@ -653,7 +703,7 @@ export function WindScene({
           glass.userData = { row: rowNumber, module: moduleNumber };
           assembly.add(glass);
           const immediateState = getImmediatePanelState(rowNumber, moduleNumber, rowColumns, rowConfig.panelsDeep);
-          const immediateDamaged = immediateState === "displaced";
+          const immediateDamaged = !["intact", "attached", "missing"].includes(immediateState);
           const immediatePresent = immediateState !== "missing";
           const immediatePosition = assembly.position.clone();
           const immediateRotation = new THREE.Euler(tilt, 0, 0);
@@ -661,21 +711,23 @@ export function WindScene({
             const damageKey = `${rowNumber}:${moduleNumber}`;
             const photoDefaultRow = rowConfig.panelsDeep === 2
               && ((rowNumber === 1 && rowColumns === 14) || (rowNumber === 2 && rowColumns === 28));
-            const downhill = photoDefaultRow
-              ? PHOTO_DAMAGE_DOWNHILL.has(damageKey)
-              : moduleNumber % 5 === 0;
-            const upright = photoDefaultRow
-              ? PHOTO_DAMAGE_UPRIGHT.has(damageKey)
-              : !downhill && moduleNumber % 7 === 0;
-            const folded = photoDefaultRow
-              ? PHOTO_DAMAGE_FOLDED.has(damageKey)
-              : !downhill && !upright && moduleNumber % 3 === 0;
-            if (downhill) {
-              const gravelWidthAtFront = wallXAt(gravelMaxZ) - gravelMinX;
+            const photoPose = photoDefaultRow ? PHOTO_DAMAGE_POSES[damageKey] : undefined;
+            if (photoPose) {
+              immediatePosition.set(
+                photoPose.x,
+                photoPose.terrain
+                  ? siteTerrainHeightAt(photoPose.x, photoPose.z) + photoPose.height
+                  : photoPose.height,
+                photoPose.z,
+              );
+              immediateRotation.set(
+                THREE.MathUtils.degToRad(photoPose.pitchDeg),
+                THREE.MathUtils.degToRad(photoPose.yawDeg),
+                THREE.MathUtils.degToRad(photoPose.rollDeg),
+              );
+            } else if (immediateState === "downhill") {
+              const gravelWidthAtFront = wallBaseX - gravelMinX;
               immediatePosition.x = gravelMinX + 1.5 + hash(moduleNumber + rowNumber * 47) * (gravelWidthAtFront - 3);
-              if (moduleNumber === 24 || moduleNumber === 47 || moduleNumber === 53) {
-                immediatePosition.x = gravelMinX - 1.2 - hash(moduleNumber + 191) * 3.8;
-              }
               immediatePosition.z = gravelMaxZ + 1.5 + hash(moduleNumber + rowNumber * 71) * 7.5;
               immediatePosition.y = siteTerrainHeightAt(immediatePosition.x, immediatePosition.z) + 0.09;
               immediateRotation.set(
@@ -683,7 +735,7 @@ export function WindScene({
                 (hash(moduleNumber + 301) - 0.5) * 1.5,
                 (hash(moduleNumber + 331) - 0.5) * 0.08,
               );
-            } else if (upright) {
+            } else if (immediateState === "upright") {
               immediatePosition.x += (hash(moduleNumber + rowNumber * 89) - 0.5) * 1.3;
               immediatePosition.z += 0.4 + hash(moduleNumber + 361) * 1.1;
               immediatePosition.y = panelSlopeM * 0.48;
@@ -692,14 +744,22 @@ export function WindScene({
                 (hash(moduleNumber + 421) - 0.5) * 0.42,
                 (hash(moduleNumber + 451) - 0.5) * 0.28,
               );
+            } else if (immediateState === "gravel") {
+              immediatePosition.z = gravelMaxZ - 3.5 + hash(moduleNumber + 631) * 2.2;
+              immediatePosition.y = 0.08;
+              immediateRotation.set(
+                THREE.MathUtils.degToRad(2 + hash(moduleNumber + 691) * 4),
+                (hash(moduleNumber + 751) - 0.5) * 0.75,
+                (hash(moduleNumber + 781) - 0.5) * 0.08,
+              );
             } else {
               immediatePosition.x += (hash(moduleNumber + rowNumber * 107) - 0.5) * 2.6;
               immediatePosition.z += 0.2 + hash(moduleNumber + 631) * 1.8;
-              immediatePosition.y = folded ? 0.34 : 0.1 + hash(moduleNumber + 661) * 0.08;
+              immediatePosition.y = 0.18 + hash(moduleNumber + 661) * 0.16;
               immediateRotation.set(
-                folded ? THREE.MathUtils.degToRad(28 + hash(moduleNumber + 691) * 24) : THREE.MathUtils.degToRad(hash(moduleNumber + 721) * 9),
+                THREE.MathUtils.degToRad(8 + hash(moduleNumber + 691) * 18),
                 (hash(moduleNumber + 751) - 0.5) * 0.62,
-                (hash(moduleNumber + 781) - 0.5) * (folded ? 0.22 : 0.12),
+                (hash(moduleNumber + 781) - 0.5) * 0.18,
               );
             }
           }
@@ -726,6 +786,7 @@ export function WindScene({
             immediateRotation,
             immediateDamaged,
             immediatePresent,
+            immediateState,
             crack,
           });
           clickablePanels.push(glass);
@@ -1509,7 +1570,7 @@ export function WindScene({
         </strong>
         {arrayState === "immediate" ? (
           <strong>
-            {immediateInventory.visible} PHOTO-VISIBLE · {immediateInventory.attached} IN PLACE · {immediateInventory.displaced} DISPLACED · {immediateInventory.missing} OFF-SITE
+            {immediateInventory.visible} PHOTO-RESOLVED · {immediateInventory.attached} MOUNTED · {immediateInventory.rack} SHIFTED · {immediateInventory.upright} UPRIGHT · {immediateInventory.ground} GROUND · {immediateInventory.missing} UNSEEN
           </strong>
         ) : null}
       </div>
