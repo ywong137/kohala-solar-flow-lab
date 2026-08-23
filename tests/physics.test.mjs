@@ -15,6 +15,8 @@ import {
   getSiteFlowEffects,
   getSiteTerrainHeight,
   getScreenGeometry,
+  pressureColor,
+  pressureDemandLabel,
   resolveSiteFlowBoundary,
   riskColor,
   simulate,
@@ -61,6 +63,26 @@ test("turns yellow at 26 vibration and reports the displayed panel travel", () =
   const motion = getPanelVisualMotion(26, DEFAULT_ARRAY_CONFIG);
   assert.ok(Math.abs(motion.peakToPeakMm - 5.6) < 0.1);
   assert.ok(Math.abs(motion.panelLengthPercent - 0.286) < 0.005);
+});
+
+test("uses an absolute pressure-demand scale across weather scenarios", () => {
+  assert.equal(pressureColor(0.08), "#69d9ff");
+  assert.equal(pressureDemandLabel(0.08), "Low");
+  assert.equal(pressureDemandLabel(0.32), "Moderate");
+  assert.equal(pressureDemandLabel(0.7), "Elevated");
+  assert.equal(pressureDemandLabel(1.1), "High");
+  assert.equal(pressureDemandLabel(1.53), "Severe");
+  assert.notEqual(pressureColor(0.08), pressureColor(1.53));
+});
+
+test("keeps sea breezes blue while escalating high-wind pressure", () => {
+  const makaiSeaBreeze = simulate({ ...baseConfig, ...SCENARIOS.makai });
+  const southeastCrosswind = simulate({ ...baseConfig, ...SCENARIOS.cross });
+  const maukaStorm = simulate({ ...baseConfig, ...SCENARIOS.storm });
+
+  assert.equal(pressureDemandLabel(makaiSeaBreeze.peakUpliftKpa), "Low");
+  assert.equal(pressureDemandLabel(southeastCrosswind.peakUpliftKpa), "Moderate");
+  assert.equal(pressureDemandLabel(maukaStorm.peakUpliftKpa), "Severe");
 });
 
 test("routes site flow over the hill and retaining wall", () => {

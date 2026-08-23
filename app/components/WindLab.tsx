@@ -44,6 +44,8 @@ import {
   getPanelResult,
   getPanelVisualMotion,
   getSoutheastEdgeLine,
+  pressureColor,
+  pressureDemandLabel,
   riskColor,
   simulate,
   type MitigationId,
@@ -353,6 +355,20 @@ export function WindLab() {
             </div>
           ) : null}
 
+          {viewMode === "pressure" ? (
+            <div className={`pressure-visual-key ${mitigation !== "none" ? "with-mitigation" : ""}`}>
+              <div className="pressure-key-heading">
+                <strong>Peak uplift · absolute scale</strong>
+                <span>{pressureDemandLabel(result.peakUpliftKpa)} demand</span>
+              </div>
+              <div className="pressure-key-gradient" aria-hidden="true" />
+              <div className="pressure-key-ticks" aria-label="Pressure color scale in kilopascals">
+                <span>0</span><span>0.2</span><span>0.6</span><span>1.0</span><span>1.4+ kPa</span>
+              </div>
+              <small className="pressure-key-meaning">Blue low · Green moderate · Yellow elevated · Orange high · Red severe</small>
+            </div>
+          ) : null}
+
           <div className="wind-compass-card">
             <div className="mini-compass" aria-hidden="true">
               <span className="north-mark">N</span>
@@ -384,8 +400,8 @@ export function WindLab() {
               label="Peak uplift"
               value={result.peakUpliftKpa.toFixed(2)}
               unit="kPa"
-              note={`Row ${result.peakRow} · Col ${result.peakColumn}`}
-              color={riskColor(result.peakUpliftKpa, 1.8)}
+              note={`${pressureDemandLabel(result.peakUpliftKpa)} · Row ${result.peakRow} · Col ${result.peakColumn}`}
+              color={pressureColor(result.peakUpliftKpa)}
             />
             <Metric
               label="Front / rear"
@@ -894,6 +910,7 @@ export function WindLab() {
               <article><span>09</span><h3>Added hardware demand</h3><p>The model resolves screen bays, vanes, deflector bays, and damper joints. It calculates pressure, force, attachment demand, overturning moment, and vibration response.</p></article>
               <article><span>10</span><h3>Device assumptions</h3><p>Loads use the <a href="https://www1.grc.nasa.gov/beginners-guide-to-aeronautics/drag-equation/" target="_blank" rel="noreferrer">NASA drag equation</a>, projected wind angle, local turbulence, and assumed device modes. Screen porosity follows the measured trend in the <a href="https://www.ars.usda.gov/ARSUserFiles/30200525/1095%20Windbreak%20drag%20as%20influenced%20by%20porosity.pdf" target="_blank" rel="noreferrer">USDA windbreak study</a>.</p></article>
               <article><span>11</span><h3>Terrain and wall flow</h3><p>The flow follows the rendered ground and clears the wall. Speed loss and turbulence depend on wall height, distance, and wind angle. The approximation follows <a href="https://wasp.dtu.dk/software/wasp-cfd/flow-model" target="_blank" rel="noreferrer">DTU terrain-flow methods</a> and <a href="https://publications.anl.gov/anlpubs/2021/05/167360.pdf" target="_blank" rel="noreferrer">Argonne wall-wake scaling</a>.</p></article>
+              <article><span>12</span><h3>Absolute pressure colors</h3><p>Pressure colors use absolute peak uplift, not each scenario’s maximum. Blue is low demand. Green is moderate. Yellow is elevated. Orange is high. Red is severe. The scale uses 2.4 kPa as a provisional module reference from a similar <a href="https://jinkosolar.com.au/wp-content/uploads/2022/04/EaglePerc-JKM390-410M-72H-A1.1-EN.pdf" target="_blank" rel="noreferrer">Jinko Eagle PERC datasheet</a>. It does not establish rack, clamp, anchor, or fatigue capacity.</p></article>
               <article><span>06</span><h3>Recorded wind</h3><p>The sound control uses the CC0 “Steady wind” recording from the USC/Sunset sound-effects collection. Speed controls its gain and playback rate.</p></article>
             </div>
             <div className="modal-caution"><Info size={16} /> Do not use these values for final structural design or manufacturer compliance.</div>

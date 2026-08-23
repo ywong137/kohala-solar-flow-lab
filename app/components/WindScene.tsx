@@ -12,6 +12,7 @@ import {
   getFlowComponents,
   getInstalledScreenRows,
   getPanelResult,
+  pressureColor,
   riskColor,
   getRetainingWallX,
   getRowCenterZ,
@@ -1252,19 +1253,17 @@ export function WindScene({
         sceneLabels.forEach((label) => {
           label.visible = live.showSceneLabels;
         });
-        const maxPressure = Math.max(...live.result.rows.map((row) => row.peakUpliftKpa), 0.01);
         let activePanel: PanelVisual | null = null;
         for (const panel of panelVisuals) {
           const panelResult = getPanelResult(live.result, panel.row, panel.module);
           const selected = panel.row === live.selectedPanel.row && panel.module === live.selectedPanel.module;
-          const risk = live.viewMode === "pressure"
-            ? panelResult.peakUpliftKpa / maxPressure
-            : live.viewMode === "vibration"
-              ? panelResult.vibrationIndex / 100
-              : 0.12;
           const color = live.viewMode === "flow"
-            ? new THREE.Color().setHSL(0.54 * (1 - risk), 0.82, 0.43 + risk * 0.08)
-            : new THREE.Color(riskColor(risk * 100));
+            ? new THREE.Color().setHSL(0.54 * (1 - 0.12), 0.82, 0.43 + 0.12 * 0.08)
+            : new THREE.Color(
+              live.viewMode === "pressure"
+                ? pressureColor(panelResult.peakUpliftKpa)
+                : riskColor(panelResult.vibrationIndex),
+            );
           panel.glass.material.color.copy(color);
           panel.glass.material.emissive.copy(selected ? new THREE.Color(0xffd84f) : color.clone().multiplyScalar(0.19));
           panel.glass.material.emissiveIntensity = selected ? 2.1 : live.viewMode === "flow" ? 0.32 : 0.66;
@@ -1364,10 +1363,11 @@ export function WindScene({
             material.emissiveIntensity = concept === "dampers" ? 2.4 : 1.35;
             return;
           }
-          const risk = live.viewMode === "pressure"
-            ? elementLoad.pressureKpa / Math.max(activeDeviceLoad.peakPressureKpa, 0.01)
-            : elementLoad.vibrationIndex / 100;
-          const loadColor = new THREE.Color(riskColor(risk * 100));
+          const loadColor = new THREE.Color(
+            live.viewMode === "pressure"
+              ? pressureColor(elementLoad.pressureKpa)
+              : riskColor(elementLoad.vibrationIndex),
+          );
           material.color.copy(loadColor);
           material.emissive.copy(loadColor).multiplyScalar(0.62);
           material.emissiveIntensity = 1.55;

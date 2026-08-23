@@ -446,12 +446,30 @@ export type SimulationResult = {
 export const MITIGATION_BASE_COLOR = "#ff66d8";
 export const PANEL_VISUAL_ROTATION_RAD_PER_INDEX = 0.00011;
 
+export const PRESSURE_COLOR_BANDS = [
+  { maxKpa: 0.2, label: "Low", colorName: "Blue" },
+  { maxKpa: 0.6, label: "Moderate", colorName: "Green" },
+  { maxKpa: 1, label: "Elevated", colorName: "Yellow" },
+  { maxKpa: 1.4, label: "High", colorName: "Orange" },
+  { maxKpa: Number.POSITIVE_INFINITY, label: "Severe", colorName: "Red" },
+] as const;
+
 const RISK_COLOR_STOPS = [
   { at: 0, color: [105, 217, 255] },
   { at: 0.26, color: [233, 239, 114] },
   { at: 0.58, color: [255, 171, 93] },
   { at: 0.82, color: [255, 95, 98] },
   { at: 1, color: [255, 63, 95] },
+] as const;
+
+const PRESSURE_COLOR_STOPS = [
+  { at: 0, color: [105, 217, 255] },
+  { at: 0.15, color: [105, 217, 255] },
+  { at: 0.35, color: [105, 222, 170] },
+  { at: 0.65, color: [233, 239, 114] },
+  { at: 1.05, color: [255, 171, 93] },
+  { at: 1.45, color: [255, 95, 98] },
+  { at: 2.4, color: [255, 63, 95] },
 ] as const;
 
 export const MITIGATIONS: Record<MitigationId, { label: string; short: string; detail: string; color: string; colorName: string }> = {
@@ -1024,17 +1042,31 @@ export function simulate(config: SimulationConfig): SimulationResult {
   return { dynamicPressureKpa, sheddingFrequencyHz, peakUpliftKpa: peak.peakUpliftKpa, peakRow: peak.row, peakColumn: peak.column, peakModule: peak.module, vibrationIndex: vibration, frontRearRatio: rear > 0 ? front / rear : 1, alignmentPercent, rows, mitigationLoad };
 }
 
-export function riskColor(value: number, max = 100) {
-  const t = clamp(value / Math.max(max, 0.001), 0, 1);
-  const upperIndex = RISK_COLOR_STOPS.findIndex((stop) => t <= stop.at);
+type ColorStop = { at: number; color: readonly [number, number, number] };
+
+function interpolateColor(value: number, stops: readonly ColorStop[]) {
+  const boundedValue = clamp(value, stops[0].at, stops[stops.length - 1].at);
+  const upperIndex = stops.findIndex((stop) => boundedValue <= stop.at);
   if (upperIndex <= 0) return "#69d9ff";
-  const lower = RISK_COLOR_STOPS[upperIndex - 1];
-  const upper = RISK_COLOR_STOPS[upperIndex];
-  const blend = (t - lower.at) / Math.max(0.001, upper.at - lower.at);
+  const lower = stops[upperIndex - 1];
+  const upper = stops[upperIndex];
+  const blend = (boundedValue - lower.at) / Math.max(0.001, upper.at - lower.at);
   const channels = lower.color.map((channel, index) =>
     Math.round(channel + (upper.color[index] - channel) * blend),
   );
   return `#${channels.map((channel) => channel.toString(16).padStart(2, "0")).join("")}`;
+}
+
+export function riskColor(value: number, max = 100) {
+  return interpolateColor(value / Math.max(max, 0.001), RISK_COLOR_STOPS);
+}
+
+export function pressureColor(pressureKpa: number) {
+  return interpolateColor(pressureKpa, PRESSURE_COLOR_STOPS);
+}
+
+export function pressureDemandLabel(pressureKpa: number) {
+  return PRESSURE_COLOR_BANDS.find((band) => pressureKpa < band.maxKpa)?.label ?? "Severe";
 }
 
 export function getPanelVisualMotion(
