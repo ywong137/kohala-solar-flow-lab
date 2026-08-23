@@ -89,7 +89,7 @@ export function WindLab() {
   const [arrayState, setArrayState] = useState<ArrayState>("restored");
   const [cameraView, setCameraView] = useState<"perspective" | "mauka" | "makai" | "plan">("perspective");
   const [cameraRequest, setCameraRequest] = useState(0);
-  const [selectedPanel, setSelectedPanel] = useState({ row: 1, module: 9 });
+  const [selectedPanel, setSelectedPanel] = useState({ row: 2, module: 1 });
   const [showComparison, setShowComparison] = useState(false);
   const [showEvidence, setShowEvidence] = useState(false);
   const [showAssumptions, setShowAssumptions] = useState(false);
@@ -847,7 +847,7 @@ export function WindLab() {
               <article><span>03</span><h3>Local vibration</h3><p>Each panel uses its local turbulence and pressure. Dampers change only the fitted rows. This model is not full CFD.</p></article>
               <article><span>04</span><h3>Array totals</h3><p>The saved layout has {geometryMetrics.totalPanelCount} panels. It has {geometryMetrics.panelCounts.slice(2).reduce((sum, count) => sum + count, 0)} after Rows 1 and 2 are removed.</p></article>
               <article><span>05</span><h3>Estimated rack and site</h3><p>The rack uses a {geometryMetrics.tableChordM.toFixed(2)} m maximum slope and {geometry.lowEdgeClearanceM.toFixed(2)}–{geometryMetrics.highEdgeClearanceM.toFixed(2)} m clearance. The wall stays straight in plan. Its top rises at the center. The retained hill meets its upper edge.</p></article>
-              <article><span>09</span><h3>Immediate damage</h3><p>The photo trace resolves 55 front panels. It shows 34 mounted, 8 shifted on racks, 4 upright, 4 on gravel, and 5 downhill. The other 29 panels are not visible. All racks remain installed.</p></article>
+              <article><span>09</span><h3>Immediate damage</h3><p>The two primary damage views resolve 69 front panels. They show 30 mounted, 30 piled on racks, 4 upright, 1 on gravel, and 4 downhill. The other 15 panels are not visible. All racks remain installed.</p></article>
               <article><span>08</span><h3>Research-based dynamics</h3><p>The defaults use the low end of field tests on a tracking PV rack: 2.9 Hz torsional frequency and 1.1% damping. This fixed rack still needs a site modal test.</p></article>
               <article><span>06</span><h3>Recorded wind</h3><p>The sound control uses the CC0 “Steady wind” recording from the USC/Sunset sound-effects collection. Speed controls its gain and playback rate.</p></article>
             </div>

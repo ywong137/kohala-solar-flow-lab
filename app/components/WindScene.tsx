@@ -72,12 +72,12 @@ type PhotoDamageSymbol = "A" | "R" | "U" | "G" | "D" | "M";
 // Row 1 starts at the array midpoint because the saved geometry right-aligns its 14 columns.
 const PHOTO_DAMAGE_LAYOUT: Record<1 | 2, readonly [string, string]> = {
   1: [
-    "MMMMMAAAAUUUUR",
-    "MMMMMAAAAAADDD",
+    "AAAAMRRUUUURRR",
+    "MMMAAAARRRRRRR",
   ],
   2: [
-    "AAAAAAAARRMMMMAAAAGGMMMMRRDM",
-    "AAAAAAAAAARRMMMMMAAGGRMMMDMM",
+    "AAAAAAAARRRRAAAMMDRRRRRMMMMM",
+    "AAAAAAAARRRRAAARRRRRGMMMMDDD",
   ],
 };
 
@@ -102,27 +102,45 @@ type PhotoDamagePose = {
 
 // These poses trace the loose-panel groups across the front, front-right, corner, and makai photos.
 const PHOTO_DAMAGE_POSES: Record<string, PhotoDamagePose> = {
-  "1:10": { x: 4.35, z: 20.05, height: 0.96, pitchDeg: 82, yawDeg: -8, rollDeg: -4, terrain: false },
-  "1:11": { x: 5.45, z: 20.28, height: 0.96, pitchDeg: 85, yawDeg: -3, rollDeg: 3, terrain: false },
-  "1:12": { x: 6.55, z: 20.16, height: 0.96, pitchDeg: 81, yawDeg: 4, rollDeg: -2, terrain: false },
-  "1:13": { x: 7.65, z: 20.42, height: 0.96, pitchDeg: 84, yawDeg: 9, rollDeg: 5, terrain: false },
-  "1:14": { x: 9.45, z: 19.55, height: 0.72, pitchDeg: 24, yawDeg: -14, rollDeg: 5, terrain: false },
-  "1:26": { x: -20.6, z: 31.4, height: 0.08, pitchDeg: 3, yawDeg: -31, rollDeg: 2, terrain: true },
-  "1:27": { x: -14.7, z: 33.2, height: 0.08, pitchDeg: 5, yawDeg: 19, rollDeg: -3, terrain: true },
-  "1:28": { x: -8.5, z: 35.1, height: 0.08, pitchDeg: 2, yawDeg: -9, rollDeg: 1, terrain: true },
-  "2:9": { x: -8.05, z: 12.2, height: 1.05, pitchDeg: 38, yawDeg: -7, rollDeg: 5, terrain: false },
-  "2:10": { x: -6.95, z: 12.45, height: 0.92, pitchDeg: 24, yawDeg: 4, rollDeg: -3, terrain: false },
-  "2:19": { x: -10.9, z: 25.1, height: 0.08, pitchDeg: 2, yawDeg: 11, rollDeg: -1, terrain: false },
-  "2:20": { x: -4.7, z: 26.15, height: 0.08, pitchDeg: 4, yawDeg: -18, rollDeg: 2, terrain: false },
-  "2:25": { x: 7.85, z: 12.55, height: 0.95, pitchDeg: 32, yawDeg: -11, rollDeg: 4, terrain: false },
-  "2:26": { x: 9.05, z: 12.82, height: 0.75, pitchDeg: 22, yawDeg: 8, rollDeg: -4, terrain: false },
-  "2:27": { x: -2.4, z: 30.25, height: 0.08, pitchDeg: 3, yawDeg: 27, rollDeg: 2, terrain: true },
-  "2:39": { x: -5.25, z: 14.25, height: 0.44, pitchDeg: 18, yawDeg: -5, rollDeg: -5, terrain: false },
-  "2:40": { x: -3.95, z: 14.55, height: 0.32, pitchDeg: 7, yawDeg: 13, rollDeg: 4, terrain: false },
-  "2:48": { x: 1.25, z: 25.55, height: 0.08, pitchDeg: 3, yawDeg: 24, rollDeg: -2, terrain: false },
-  "2:49": { x: 7.85, z: 24.65, height: 0.08, pitchDeg: 5, yawDeg: -12, rollDeg: 1, terrain: false },
-  "2:50": { x: 6.75, z: 14.35, height: 0.42, pitchDeg: 20, yawDeg: -9, rollDeg: 3, terrain: false },
-  "2:54": { x: 5.45, z: 32.25, height: 0.08, pitchDeg: 4, yawDeg: -23, rollDeg: -2, terrain: true },
+  "1:6": { x: 3.0, z: 18.38, height: 0.76, pitchDeg: 31, yawDeg: -14, rollDeg: 5, terrain: false },
+  "1:7": { x: 4.3, z: 18.62, height: 0.58, pitchDeg: 19, yawDeg: 9, rollDeg: -4, terrain: false },
+  "1:8": { x: 1.25, z: 18.66, height: 0.98, pitchDeg: 84, yawDeg: -8, rollDeg: -3, terrain: false },
+  "1:9": { x: 2.32, z: 18.78, height: 0.98, pitchDeg: 87, yawDeg: -3, rollDeg: 2, terrain: false },
+  "1:10": { x: 3.39, z: 18.7, height: 0.98, pitchDeg: 84, yawDeg: 3, rollDeg: -2, terrain: false },
+  "1:11": { x: 4.46, z: 18.86, height: 0.98, pitchDeg: 86, yawDeg: 8, rollDeg: 4, terrain: false },
+  "1:12": { x: 6.0, z: 18.28, height: 1.08, pitchDeg: 47, yawDeg: -17, rollDeg: 6, terrain: false },
+  "1:13": { x: 7.35, z: 18.48, height: 0.95, pitchDeg: 39, yawDeg: 4, rollDeg: -5, terrain: false },
+  "1:14": { x: 8.7, z: 18.72, height: 0.78, pitchDeg: 32, yawDeg: 14, rollDeg: 4, terrain: false },
+  "1:22": { x: 1.1, z: 20.72, height: 0.7, pitchDeg: 35, yawDeg: -13, rollDeg: 5, terrain: false },
+  "1:23": { x: 2.42, z: 20.92, height: 0.58, pitchDeg: 28, yawDeg: 9, rollDeg: -4, terrain: false },
+  "1:24": { x: 3.7, z: 21.0, height: 0.48, pitchDeg: 26, yawDeg: -20, rollDeg: 4, terrain: false },
+  "1:25": { x: 4.95, z: 21.32, height: 0.4, pitchDeg: 20, yawDeg: 13, rollDeg: -4, terrain: false },
+  "1:26": { x: 6.15, z: 21.65, height: 0.34, pitchDeg: 14, yawDeg: -7, rollDeg: 3, terrain: false },
+  "1:27": { x: 7.4, z: 21.45, height: 0.54, pitchDeg: 30, yawDeg: 6, rollDeg: -5, terrain: false },
+  "1:28": { x: 8.75, z: 21.1, height: 0.42, pitchDeg: 21, yawDeg: 15, rollDeg: 4, terrain: false },
+  "2:9": { x: -9.2, z: 11.75, height: 1.18, pitchDeg: 44, yawDeg: -10, rollDeg: 5, terrain: false },
+  "2:10": { x: -7.85, z: 12.08, height: 0.98, pitchDeg: 34, yawDeg: 7, rollDeg: -4, terrain: false },
+  "2:11": { x: -6.5, z: 12.42, height: 0.78, pitchDeg: 25, yawDeg: -6, rollDeg: 4, terrain: false },
+  "2:12": { x: -5.15, z: 12.66, height: 0.62, pitchDeg: 18, yawDeg: 11, rollDeg: -3, terrain: false },
+  "2:18": { x: -34.5, z: 34.2, height: 0.08, pitchDeg: 3, yawDeg: -28, rollDeg: 2, terrain: true },
+  "2:19": { x: -3.5, z: 11.72, height: 1.12, pitchDeg: 39, yawDeg: -12, rollDeg: 5, terrain: false },
+  "2:20": { x: -2.15, z: 12.05, height: 0.94, pitchDeg: 31, yawDeg: 6, rollDeg: -4, terrain: false },
+  "2:21": { x: -0.8, z: 12.38, height: 0.76, pitchDeg: 24, yawDeg: -8, rollDeg: 4, terrain: false },
+  "2:22": { x: 0.55, z: 12.7, height: 0.62, pitchDeg: 18, yawDeg: 10, rollDeg: -3, terrain: false },
+  "2:23": { x: 1.85, z: 12.92, height: 0.55, pitchDeg: 16, yawDeg: -9, rollDeg: 4, terrain: false },
+  "2:37": { x: -7.6, z: 14.02, height: 0.58, pitchDeg: 28, yawDeg: -10, rollDeg: -5, terrain: false },
+  "2:38": { x: -6.2, z: 14.28, height: 0.46, pitchDeg: 20, yawDeg: 7, rollDeg: 4, terrain: false },
+  "2:39": { x: -4.8, z: 14.55, height: 0.38, pitchDeg: 14, yawDeg: -5, rollDeg: -4, terrain: false },
+  "2:40": { x: -3.4, z: 14.82, height: 0.34, pitchDeg: 10, yawDeg: 12, rollDeg: 4, terrain: false },
+  "2:44": { x: -1.25, z: 14.0, height: 0.68, pitchDeg: 34, yawDeg: -13, rollDeg: 5, terrain: false },
+  "2:45": { x: 0.2, z: 14.1, height: 0.62, pitchDeg: 31, yawDeg: -12, rollDeg: 5, terrain: false },
+  "2:46": { x: 1.55, z: 14.4, height: 0.5, pitchDeg: 23, yawDeg: 8, rollDeg: -4, terrain: false },
+  "2:47": { x: 2.9, z: 14.7, height: 0.4, pitchDeg: 16, yawDeg: -7, rollDeg: 4, terrain: false },
+  "2:48": { x: 4.25, z: 14.95, height: 0.34, pitchDeg: 11, yawDeg: 11, rollDeg: -3, terrain: false },
+  "2:49": { x: -5.8, z: 25.42, height: 0.08, pitchDeg: 3, yawDeg: 18, rollDeg: -2, terrain: false },
+  "2:54": { x: -39.5, z: 31.8, height: 0.08, pitchDeg: 4, yawDeg: -22, rollDeg: -2, terrain: true },
+  "2:55": { x: -43.5, z: 37.1, height: 0.08, pitchDeg: 2, yawDeg: 16, rollDeg: 2, terrain: true },
+  "2:56": { x: -31.5, z: 40.2, height: 0.08, pitchDeg: 5, yawDeg: -7, rollDeg: -3, terrain: true },
 };
 
 function getImmediatePanelState(
@@ -141,7 +159,7 @@ function getImmediatePanelState(
   }
 
   const presentRatio = row === 1 ? 18 / 28 : 37 / 56;
-  const attachedRatio = row === 1 ? 10 / 18 : 24 / 37;
+  const attachedRatio = row === 1 ? 8 / 24 : 22 / 45;
   if (hash(row * 1000 + module) > presentRatio) return "missing";
   return hash(row * 2000 + module) < attachedRatio ? "attached" : "rack";
 }
@@ -325,14 +343,15 @@ function makeTextSprite(text: string, style: TextSpriteStyle = "default") {
   return sprite;
 }
 
-function makeBeam(
+function makeRackBeam(
   start: THREE.Vector3,
   end: THREE.Vector3,
-  radius: number,
+  width: number,
+  depth: number,
   material: THREE.Material,
 ) {
   const direction = new THREE.Vector3().subVectors(end, start);
-  const beam = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius, direction.length(), 8), material);
+  const beam = new THREE.Mesh(new THREE.BoxGeometry(width, direction.length(), depth), material);
   beam.position.copy(start).add(end).multiplyScalar(0.5);
   beam.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), direction.clone().normalize());
   beam.castShadow = true;
@@ -459,7 +478,7 @@ export function WindScene({
     const wallProgressAt = (z: number) => clamp((z - wallMinZ) / wallDepth, 0, 1);
     const wallTopHeightAt = (z: number) => {
       const arch = Math.sin(wallProgressAt(z) * Math.PI);
-      return 0.42 + Math.pow(Math.max(0, arch), 0.72) * 1.08;
+      return 0.63 + Math.pow(Math.max(0, arch), 0.72) * 1.62;
     };
     const retainedHillHeightAt = (x: number, z: number) => {
       const localWallX = wallBaseX;
@@ -635,10 +654,11 @@ export function WindScene({
     scene.add(arrayGroup);
     const panelVisuals: PanelVisual[] = [];
     const rackVisuals: RackVisual[] = [];
+    const rowLabels: THREE.Sprite[] = [];
     const clickablePanels: THREE.Object3D[] = [];
     const panelTexture = makePanelTexture(renderer);
-    const frameMaterial = new THREE.MeshStandardMaterial({ color: 0x9aa9a8, metalness: 0.82, roughness: 0.26 });
-    const rackMaterial = new THREE.MeshStandardMaterial({ color: 0x758482, metalness: 0.88, roughness: 0.3 });
+    const frameMaterial = new THREE.MeshStandardMaterial({ color: 0xb8c0be, metalness: 0.7, roughness: 0.32 });
+    const rackMaterial = new THREE.MeshStandardMaterial({ color: 0xaeb9b7, metalness: 0.68, roughness: 0.38 });
     const lowEdgeHeight = geometry.lowEdgeClearanceM;
     const modulePitch = geometryMetrics.modulePitchM;
     const fullRowWidth = Math.max(...geometry.rows.map((_, index) => getRowWidth(index + 1, geometry)));
@@ -794,8 +814,8 @@ export function WindScene({
       }
 
       for (const railZ of [-rowChordM * 0.39, -rowChordM * 0.13, rowChordM * 0.13, rowChordM * 0.39]) {
-        const railHeight = rowCenterHeight - Math.sin(tilt) * railZ - 0.12;
-        const rail = new THREE.Mesh(new THREE.BoxGeometry(rowWidth + 0.1, 0.08, 0.09), rackMaterial);
+        const railHeight = rowCenterHeight - Math.sin(tilt) * railZ - 0.17;
+        const rail = new THREE.Mesh(new THREE.BoxGeometry(rowWidth + 0.1, 0.2, 0.17), rackMaterial);
         rail.position.set(rowOffsetX, railHeight, z + railZ);
         rail.castShadow = true;
         arrayGroup.add(rail);
@@ -806,8 +826,8 @@ export function WindScene({
       for (let support = 0; support < supportCount; support += 1) {
         const x = rowOffsetX - rowWidth / 2 + 0.5 + support * ((rowWidth - 1) / (supportCount - 1));
         const postTop = new THREE.Vector3(x, rowCenterHeight - 0.12, z - 0.15);
-        const post = makeBeam(new THREE.Vector3(x, 0.08, z - 0.15), postTop, 0.045, rackMaterial);
-        const brace = makeBeam(new THREE.Vector3(x, 0.08, z + 1.42), postTop, 0.038, rackMaterial);
+        const post = makeRackBeam(new THREE.Vector3(x, 0.08, z - 0.15), postTop, 0.12, 0.15, rackMaterial);
+        const brace = makeRackBeam(new THREE.Vector3(x, 0.08, z + 1.42), postTop, 0.09, 0.12, rackMaterial);
         arrayGroup.add(post, brace);
         rackVisuals.push(
           { object: post, basePosition: post.position.clone(), baseQuaternion: post.quaternion.clone() },
@@ -820,6 +840,7 @@ export function WindScene({
       label.position.set(rowOffsetX - rowWidth / 2 - 3.35, 1.15, z);
       label.scale.set(4.9, 1.22, 1);
       arrayGroup.add(label);
+      rowLabels.push(label);
     }
 
     const maukaLabel = makeTextSprite("MAUKA · NE · UPWIND", "accent");
@@ -1112,9 +1133,9 @@ export function WindScene({
       const sideDistance = Math.max(52, sceneDepth * 0.72);
       const planHeight = Math.max(68, sceneExtent * 0.86);
       const targets = {
-        perspective: { position: new THREE.Vector3(arrayCenterX + sideDistance * 0.65, sideDistance * 0.52, sideDistance * 0.76), target: new THREE.Vector3(arrayCenterX, 0.3, 0) },
+        perspective: { position: new THREE.Vector3(wallBaseX - 2.4, Math.max(4.8, sceneDepth * 0.07), sideDistance * 0.56), target: new THREE.Vector3(arrayCenterX, 0.9, 12) },
         mauka: { position: new THREE.Vector3(arrayCenterX, sideDistance * 0.23, -sideDistance), target: new THREE.Vector3(arrayCenterX, 0.7, 2) },
-        makai: { position: new THREE.Vector3(arrayCenterX, sideDistance * 0.23, sideDistance), target: new THREE.Vector3(arrayCenterX, 0.7, -2) },
+        makai: { position: new THREE.Vector3(arrayCenterX, Math.max(4.6, sceneDepth * 0.064), sideDistance * 0.59), target: new THREE.Vector3(arrayCenterX, 0.85, 10.5) },
         plan: { position: new THREE.Vector3(arrayCenterX, planHeight, 0.01), target: new THREE.Vector3(arrayCenterX, 0, 0) },
       };
       camera.position.copy(targets[view].position);
@@ -1285,10 +1306,15 @@ export function WindScene({
         live.config.damperDampingPercent,
         live.config.damperStartRow,
         live.config.damperEndRow,
+        live.cameraView,
         live.selectedPanel.row,
         live.selectedPanel.module,
       ].join("-");
       if (visualKey !== lastVisualKey) {
+        const showSceneLabels = live.arrayState !== "immediate" || live.cameraView === "plan";
+        rowLabels.forEach((label) => { label.visible = showSceneLabels; });
+        maukaLabel.visible = showSceneLabels;
+        makaiLabel.visible = showSceneLabels;
         const maxPressure = Math.max(...live.result.rows.map((row) => row.peakUpliftKpa), 0.01);
         let activePanel: PanelVisual | null = null;
         for (const panel of panelVisuals) {
@@ -1305,11 +1331,14 @@ export function WindScene({
           panel.glass.material.emissiveIntensity = selected ? 2.1 : live.viewMode === "flow" ? 0.32 : 0.66;
           panel.assembly.visible = !(live.arrayState === "repaired" && panel.row <= 2)
             && !(live.arrayState === "immediate" && !panel.immediatePresent);
+          if (live.arrayState === "immediate" && panel.row <= 2 && !panel.immediateDamaged) {
+            panel.glass.material.color.set(0x66858b);
+          }
           if (live.arrayState === "immediate" && panel.immediateDamaged) {
             panel.assembly.position.copy(panel.immediatePosition);
             panel.assembly.rotation.copy(panel.immediateRotation);
-            panel.glass.material.color.lerp(new THREE.Color(0x68787b), 0.56);
-            panel.glass.material.emissiveIntensity = selected ? 1.4 : 0.08;
+            panel.glass.material.color.set(0x829799);
+            panel.glass.material.emissiveIntensity = selected ? 1.4 : 0.12;
           } else {
             panel.assembly.position.copy(panel.basePosition);
             panel.assembly.rotation.set(panel.baseRotationX, 0, 0);
@@ -1570,7 +1599,7 @@ export function WindScene({
         </strong>
         {arrayState === "immediate" ? (
           <strong>
-            {immediateInventory.visible} PHOTO-RESOLVED · {immediateInventory.attached} MOUNTED · {immediateInventory.rack} SHIFTED · {immediateInventory.upright} UPRIGHT · {immediateInventory.ground} GROUND · {immediateInventory.missing} UNSEEN
+            {immediateInventory.visible} PHOTO-RESOLVED · {immediateInventory.attached} MOUNTED · {immediateInventory.rack} PILED ON RACKS · {immediateInventory.upright} UPRIGHT · {immediateInventory.ground} GROUND · {immediateInventory.missing} UNSEEN
           </strong>
         ) : null}
       </div>
