@@ -168,3 +168,60 @@ test("does not apply a rear screen to an upwind makai array", () => {
   assert.equal(makaiScreen.peakUpliftKpa, makaiBase.peakUpliftKpa);
   assert.equal(makaiScreen.vibrationIndex, makaiBase.vibrationIndex);
 });
+
+test("resolves wind-screen demand by bay and fitted row", () => {
+  const openScreen = simulate({
+    ...baseConfig,
+    mitigation: "screen",
+    screenPorosity: 80,
+    screenStartRow: 6,
+    screenEndRow: 7,
+  });
+  const solidScreen = simulate({
+    ...baseConfig,
+    mitigation: "screen",
+    screenPorosity: 20,
+    screenStartRow: 6,
+    screenEndRow: 7,
+  });
+
+  assert.equal(openScreen.mitigationLoad.concept, "screen");
+  assert.deepEqual(openScreen.mitigationLoad.rows.map((row) => row.row), [6, 7]);
+  assert.ok(openScreen.mitigationLoad.rows.every((row) => row.elementCount > 1));
+  assert.ok(solidScreen.mitigationLoad.peakPressureKpa > openScreen.mitigationLoad.peakPressureKpa);
+  assert.ok(solidScreen.mitigationLoad.peakAttachmentLoadKn > 0);
+  assert.ok(solidScreen.mitigationLoad.peakOverturningMomentKnM > 0);
+});
+
+test("scales added-hardware demand with wind speed and direction", () => {
+  const slow = simulate({ ...baseConfig, mitigation: "spoilers", windSpeedMph: 45 });
+  const fast = simulate({ ...baseConfig, mitigation: "spoilers", windSpeedMph: 90 });
+  const alongRows = simulate({ ...baseConfig, mitigation: "spoilers", windBearing: 130 });
+
+  assert.ok(fast.mitigationLoad.peakPressureKpa > slow.mitigationLoad.peakPressureKpa * 3.5);
+  assert.ok(fast.mitigationLoad.peakAttachmentLoadKn > slow.mitigationLoad.peakAttachmentLoadKn * 3.5);
+  assert.ok(alongRows.mitigationLoad.peakPressureKpa < fast.mitigationLoad.peakPressureKpa);
+  assert.equal(fast.mitigationLoad.rows[0].elementCount, baseConfig.geometry.rows[0].columns);
+});
+
+test("resolves transferred cyclic demand at every fitted damper", () => {
+  const dense = simulate({
+    ...baseConfig,
+    mitigation: "dampers",
+    damperSpacingM: 0.8,
+    damperStartRow: 2,
+    damperEndRow: 3,
+  });
+  const sparse = simulate({
+    ...baseConfig,
+    mitigation: "dampers",
+    damperSpacingM: 4,
+    damperStartRow: 2,
+    damperEndRow: 3,
+  });
+
+  assert.deepEqual(dense.mitigationLoad.rows.map((row) => row.row), [2, 3]);
+  assert.ok(dense.mitigationLoad.elementCount > sparse.mitigationLoad.elementCount);
+  assert.ok(dense.mitigationLoad.peakAttachmentLoadKn < sparse.mitigationLoad.peakAttachmentLoadKn);
+  assert.equal(dense.mitigationLoad.peakOverturningMomentKnM, 0);
+});

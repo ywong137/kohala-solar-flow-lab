@@ -45,6 +45,7 @@ import {
   riskColor,
   simulate,
   type MitigationId,
+  type MitigationLoadResult,
   type ScenarioId,
   type SimulationConfig,
   type SpoilerStyle,
@@ -337,7 +338,11 @@ export function WindLab() {
               <i />
               <span>
                 <strong>{MITIGATIONS[mitigation].label}</strong>
-                Bright {MITIGATIONS[mitigation].colorName} geometry in the model
+                {viewMode === "pressure" && result.mitigationLoad
+                  ? `Load tint · ${result.mitigationLoad.peakPressureKpa.toFixed(2)} kPa device peak`
+                  : viewMode === "vibration" && result.mitigationLoad
+                    ? `Animated response · ${result.mitigationLoad.peakVibrationIndex.toFixed(0)} / 100 device peak`
+                    : `Bright ${MITIGATIONS[mitigation].colorName} geometry in the model`}
               </span>
             </div>
           ) : null}
@@ -679,6 +684,13 @@ export function WindLab() {
             </div>
           ) : null}
 
+          {result.mitigationLoad ? (
+            <DeviceLoadPanel
+              load={result.mitigationLoad}
+              color={MITIGATIONS[mitigation].color}
+            />
+          ) : null}
+
           <button className="compare-button" onClick={() => setShowComparison(true)}>
             <BarChart3 size={16} />
             Compare concepts against baseline
@@ -764,7 +776,7 @@ export function WindLab() {
               <span><small>Saved geometry</small><strong>{geometryMetrics.totalPanelCount} panels · {rowCount} rows · {geometry.tiltDeg.toFixed(1)}° tilt</strong></span>
               <span><small>Dynamics</small><strong>{panelFrequencyHz.toFixed(1)} Hz · {dampingPercent.toFixed(1)}% damping</strong></span>
             </div>
-            <div className="comparison-legend"><span>Concept and settings</span><span>Peak uplift</span><span>Vibration</span><span>Peak location</span><span>Action</span></div>
+            <div className="comparison-legend"><span>Concept and settings</span><span>Peak uplift</span><span>Panel vibration</span><span>Peak location</span><span>Added-device demand</span><span>Action</span></div>
             <div className="comparison-list">
               {comparisons.map(({ id, result: item }) => {
                 const pressureDelta = 100 * (item.peakUpliftKpa / Math.max(baselineResult.peakUpliftKpa, 0.01) - 1);
@@ -778,6 +790,10 @@ export function WindLab() {
                     <span className="comparison-value"><strong>{item.peakUpliftKpa.toFixed(2)} kPa</strong><small>{id === "none" ? "Baseline" : formatDelta(pressureDelta)}</small></span>
                     <span className="comparison-value"><strong>{item.vibrationIndex.toFixed(0)} / 100</strong><small>{id === "none" ? "Baseline" : formatDelta(vibrationDelta)}</small></span>
                     <span className="comparison-value"><strong>Row {item.peakRow} · Col {item.peakColumn}</strong><small>highest uplift panel</small></span>
+                    <span className="comparison-value">
+                      <strong>{item.mitigationLoad ? `${item.mitigationLoad.peakAttachmentLoadKn.toFixed(2)} kN` : "—"}</strong>
+                      <small>{item.mitigationLoad ? `Row ${item.mitigationLoad.peakRow} · ${item.mitigationLoad.peakVibrationIndex.toFixed(0)} / 100 vibration` : "No added hardware"}</small>
+                    </span>
                     <button type="button" onClick={() => { setMitigation(id); setShowComparison(false); }}>{mitigation === id ? "Active" : "Use concept"}</button>
                   </article>
                 );
@@ -827,7 +843,7 @@ export function WindLab() {
           <section className="modal assumptions-modal" role="dialog" aria-modal="true" aria-label="Model assumptions" onMouseDown={(event) => event.stopPropagation()}>
             <div className="modal-head">
               <div>
-                <span className="eyebrow">MODEL BASIS · V0.7</span>
+                <span className="eyebrow">MODEL BASIS · V0.8</span>
                 <h2>What this model can test</h2>
               </div>
               <button className="icon-button" onClick={() => setShowAssumptions(false)} aria-label="Close assumptions"><X size={18} /></button>
@@ -840,6 +856,8 @@ export function WindLab() {
               <article><span>04</span><h3>Array totals</h3><p>The saved layout has {geometryMetrics.totalPanelCount} panels. It has {geometryMetrics.panelCounts.slice(2).reduce((sum, count) => sum + count, 0)} after Rows 1 and 2 are removed.</p></article>
               <article><span>05</span><h3>Estimated rack and site</h3><p>The rack uses a {geometryMetrics.tableChordM.toFixed(2)} m maximum slope and {geometry.lowEdgeClearanceM.toFixed(2)}–{geometryMetrics.highEdgeClearanceM.toFixed(2)} m clearance. The straight retaining wall follows the {southeastEdge.bearingDeg.toFixed(0)}° endpoint line at 3 m perpendicular clearance. Its top rises at the center.</p></article>
               <article><span>08</span><h3>Research-based dynamics</h3><p>The defaults use the low end of field tests on a tracking PV rack: 2.9 Hz torsional frequency and 1.1% damping. This fixed rack still needs a site modal test.</p></article>
+              <article><span>09</span><h3>Added hardware demand</h3><p>The model resolves screen bays, vanes, deflector bays, and damper joints. It calculates pressure, force, attachment demand, overturning moment, and vibration response.</p></article>
+              <article><span>10</span><h3>Device assumptions</h3><p>Loads use the <a href="https://www1.grc.nasa.gov/beginners-guide-to-aeronautics/drag-equation/" target="_blank" rel="noreferrer">NASA drag equation</a>, projected wind angle, local turbulence, and assumed device modes. Screen porosity follows the measured trend in the <a href="https://www.ars.usda.gov/ARSUserFiles/30200525/1095%20Windbreak%20drag%20as%20influenced%20by%20porosity.pdf" target="_blank" rel="noreferrer">USDA windbreak study</a>.</p></article>
               <article><span>06</span><h3>Recorded wind</h3><p>The sound control uses the CC0 “Steady wind” recording from the USC/Sunset sound-effects collection. Speed controls its gain and playback rate.</p></article>
             </div>
             <div className="modal-caution"><Info size={16} /> Do not use these values for final structural design or manufacturer compliance.</div>
@@ -847,6 +865,48 @@ export function WindLab() {
         </div>
       ) : null}
     </main>
+  );
+}
+
+function DeviceLoadPanel({ load, color }: { load: MitigationLoadResult; color: string }) {
+  return (
+    <section className="device-load-card" style={{ "--concept-accent": color } as React.CSSProperties}>
+      <div className="device-load-head">
+        <div>
+          <span className="eyebrow">ADDED HARDWARE DEMAND</span>
+          <strong>{load.elementCount} modeled {load.elementLabel}{load.elementCount === 1 ? "" : "s"}</strong>
+        </div>
+        <Wrench size={17} />
+      </div>
+      <div className="device-load-values">
+        <span><small>Peak pressure</small><strong>{load.peakPressureKpa.toFixed(2)} kPa</strong></span>
+        <span><small>Peak attachment</small><strong>{load.peakAttachmentLoadKn.toFixed(2)} kN</strong></span>
+        <span><small>Device vibration</small><strong>{load.peakVibrationIndex.toFixed(0)} / 100</strong></span>
+      </div>
+      <div className="device-row-loads" role="table" aria-label="Mitigation demand by row">
+        <div role="row" className="device-row-head">
+          <span role="columnheader">Row</span>
+          <span role="columnheader">Elements</span>
+          <span role="columnheader">Total force</span>
+          <span role="columnheader">Peak attachment</span>
+          <span role="columnheader">Vibration</span>
+        </div>
+        {load.rows.map((row) => (
+          <div role="row" key={row.row}>
+            <strong role="cell">{row.row}</strong>
+            <span role="cell">{row.elementCount}</span>
+            <span role="cell">{row.totalForceKn.toFixed(1)} kN</span>
+            <span role="cell">{row.peakAttachmentLoadKn.toFixed(2)} kN</span>
+            <span role="cell">{row.peakVibrationIndex.toFixed(0)}</span>
+          </div>
+        ))}
+      </div>
+      <p>{load.loadBasis}</p>
+      {load.peakOverturningMomentKnM > 0 ? (
+        <p>Peak support moment: {load.peakOverturningMomentKnM.toFixed(2)} kN·m at Row {load.peakRow}, {load.elementLabel} {load.peakElement}.</p>
+      ) : null}
+      <p className="device-load-caution">Demand only. Add material, anchor, and fatigue capacities before any pass/fail decision.</p>
+    </section>
   );
 }
 

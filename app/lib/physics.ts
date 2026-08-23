@@ -162,6 +162,45 @@ export type PanelResult = {
   dynamicFactor: number;
 };
 
+export type MitigationElementLoad = {
+  row: number;
+  element: number;
+  xM: number;
+  projectedAreaM2: number;
+  pressureKpa: number;
+  forceKn: number;
+  attachmentLoadKn: number;
+  overturningMomentKnM: number;
+  excitationFrequencyHz: number;
+  vibrationIndex: number;
+};
+
+export type MitigationRowLoad = {
+  row: number;
+  elementCount: number;
+  totalForceKn: number;
+  peakPressureKpa: number;
+  peakAttachmentLoadKn: number;
+  peakOverturningMomentKnM: number;
+  peakVibrationIndex: number;
+  peakElement: number;
+  elements: MitigationElementLoad[];
+};
+
+export type MitigationLoadResult = {
+  concept: Exclude<MitigationId, "none">;
+  elementLabel: string;
+  loadBasis: string;
+  elementCount: number;
+  peakPressureKpa: number;
+  peakAttachmentLoadKn: number;
+  peakOverturningMomentKnM: number;
+  peakVibrationIndex: number;
+  peakRow: number;
+  peakElement: number;
+  rows: MitigationRowLoad[];
+};
+
 export type SimulationResult = {
   dynamicPressureKpa: number;
   sheddingFrequencyHz: number;
@@ -173,6 +212,7 @@ export type SimulationResult = {
   frontRearRatio: number;
   alignmentPercent: number;
   rows: RowResult[];
+  mitigationLoad: MitigationLoadResult | null;
 };
 
 export const MITIGATIONS: Record<MitigationId, { label: string; short: string; detail: string; color: string; colorName: string }> = {
@@ -320,6 +360,254 @@ export function getPanelResult(result: SimulationResult, row: number, module: nu
   return rowResult.panels[safeModule - 1];
 }
 
+function harmonicResponseGain(excitationFrequencyHz: number, naturalFrequencyHz: number, dampingPercent: number) {
+  const ratio = excitationFrequencyHz / Math.max(0.2, naturalFrequencyHz);
+  const dampingRatio = dampingPercent / 100;
+  return clamp(
+    1 / Math.sqrt(Math.pow(1 - ratio * ratio, 2) + Math.pow(2 * dampingRatio * ratio, 2)),
+    0.35,
+    8,
+  );
+}
+
+function deviceVibrationIndex(
+  pressureKpa: number,
+  dynamicPressureKpa: number,
+  turbulenceRatio: number,
+  responseGain: number,
+) {
+  const pressureDemand = pressureKpa / Math.max(0.08, dynamicPressureKpa * 1.25);
+  const turbulenceDemand = clamp(turbulenceRatio / 0.18, 0.25, 2.2);
+  const resonanceDemand = clamp(responseGain / 2.5, 0.2, 2.4);
+  return clamp(100 * 0.48 * pressureDemand * turbulenceDemand * resonanceDemand, 0, 100);
+}
+
+function summarizeMitigationRows(
+  concept: Exclude<MitigationId, "none">,
+  elementLabel: string,
+  loadBasis: string,
+  elements: MitigationElementLoad[],
+): MitigationLoadResult {
+  const rowNumbers = [...new Set(elements.map((element) => element.row))].sort((a, b) => a - b);
+  const rows = rowNumbers.map((row): MitigationRowLoad => {
+    const rowElements = elements.filter((element) => element.row === row);
+    const peak = rowElements.reduce((current, element) =>
+      element.attachmentLoadKn > current.attachmentLoadKn ? element : current,
+    );
+    return {
+      row,
+      elementCount: rowElements.length,
+      totalForceKn: rowElements.reduce((sum, element) => sum + element.forceKn, 0),
+      peakPressureKpa: Math.max(...rowElements.map((element) => element.pressureKpa)),
+      peakAttachmentLoadKn: peak.attachmentLoadKn,
+      peakOverturningMomentKnM: Math.max(...rowElements.map((element) => element.overturningMomentKnM)),
+      peakVibrationIndex: Math.max(...rowElements.map((element) => element.vibrationIndex)),
+      peakElement: peak.element,
+      elements: rowElements,
+    };
+  });
+  const peakRow = rows.reduce((current, row) =>
+    row.peakAttachmentLoadKn > current.peakAttachmentLoadKn ? row : current,
+  );
+  return {
+    concept,
+    elementLabel,
+    loadBasis,
+    elementCount: elements.length,
+    peakPressureKpa: Math.max(...rows.map((row) => row.peakPressureKpa)),
+    peakAttachmentLoadKn: peakRow.peakAttachmentLoadKn,
+    peakOverturningMomentKnM: Math.max(...rows.map((row) => row.peakOverturningMomentKnM)),
+    peakVibrationIndex: Math.max(...rows.map((row) => row.peakVibrationIndex)),
+    peakRow: peakRow.row,
+    peakElement: peakRow.peakElement,
+    rows,
+  };
+}
+
+function simulateMitigationLoads(
+  config: SimulationConfig,
+  rows: RowResult[],
+  dynamicPressureKpa: number,
+  speedMs: number,
+  flow: FlowComponents,
+  panelSheddingFrequencyHz: number,
+): MitigationLoadResult | null {
+  if (config.mitigation === "none") return null;
+  const geometry = config.geometry;
+  const metrics = getArrayMetrics(geometry);
+  const arrayBounds = getArrayBounds(geometry);
+  const fullRowWidth = Math.max(...geometry.rows.map((_, index) => getRowWidth(index + 1, geometry)));
+  const elements: MitigationElementLoad[] = [];
+  const localPanelAt = (row: number, xM: number) =>
+    rows[row - 1].panels.reduce((current, panel) =>
+      Math.abs(panel.xM - xM) < Math.abs(current.xM - xM) ? panel : current,
+    );
+  const edgeFactorAt = (xM: number, scaleM: number) => {
+    const upwindDistance = flow.x >= 0 ? xM - arrayBounds.minX : arrayBounds.maxX - xM;
+    return 1 + 0.18 * Math.abs(flow.x) * Math.exp(-Math.max(0, upwindDistance) / Math.max(0.4, scaleM));
+  };
+  const gustFactorAt = (turbulenceRatio: number) => clamp(1 + 2.7 * turbulenceRatio, 1.08, 2.05);
+
+  if (config.mitigation === "screen") {
+    const porosityRatio = clamp(config.screenPorosity / 100, 0.2, 0.8);
+    const solidity = 1 - porosityRatio;
+    const dragCoefficient = 0.2 + 1.1 * Math.pow(solidity, 1.35);
+    const normalSpeed = speedMs * Math.abs(flow.z);
+    const normalPressureFactor = 0.05 + 0.95 * flow.z * flow.z;
+    for (const row of getInstalledScreenRows(config)) {
+      const screen = getScreenGeometry(row, geometry);
+      const segmentCount = Math.max(1, Math.ceil(screen.width / 4));
+      const segmentWidth = screen.width / segmentCount;
+      for (let segment = 0; segment < segmentCount; segment += 1) {
+        const xM = screen.x - screen.width / 2 + (segment + 0.5) * segmentWidth;
+        const localPanel = localPanelAt(row, xM);
+        const turbulenceRatio = Math.max(config.ambientTurbulence / 100, localPanel.turbulencePercent / 100);
+        const pressureKpa = dynamicPressureKpa * normalPressureFactor * dragCoefficient
+          * gustFactorAt(turbulenceRatio) * edgeFactorAt(xM, config.screenHeightM * 2);
+        const projectedAreaM2 = segmentWidth * config.screenHeightM;
+        const forceKn = pressureKpa * projectedAreaM2;
+        const excitationFrequencyHz = 0.16 * normalSpeed / Math.max(0.3, config.screenHeightM * (0.6 + 0.4 * porosityRatio));
+        const responseGain = harmonicResponseGain(excitationFrequencyHz, 1.5, 2);
+        elements.push({
+          row,
+          element: segment + 1,
+          xM,
+          projectedAreaM2,
+          pressureKpa,
+          forceKn,
+          attachmentLoadKn: forceKn / 2,
+          overturningMomentKnM: forceKn * config.screenHeightM / 4,
+          excitationFrequencyHz,
+          vibrationIndex: deviceVibrationIndex(pressureKpa, dynamicPressureKpa, turbulenceRatio, responseGain),
+        });
+      }
+    }
+    return summarizeMitigationRows(
+      "screen",
+      "screen bay",
+      "Porous-screen drag on gross bay area; two posts share each bay load. Vibration assumes a 1.5 Hz mode and 2% damping.",
+      elements,
+    );
+  }
+
+  if (config.mitigation === "vanes") {
+    const normalSpeed = speedMs * Math.abs(flow.x);
+    const normalPressureFactor = 0.08 + 0.92 * flow.x * flow.x;
+    for (let row = 1; row <= geometry.rows.length; row += 1) {
+      if (!rowIsInRange(row, config.vaneStartRow, config.vaneEndRow, geometry.rows.length)) continue;
+      const rowWidth = getRowWidth(row, geometry);
+      const rowOffsetX = getRowOffsetX(row, geometry);
+      const vaneCount = Math.max(3, Math.round(7 * rowWidth / fullRowWidth));
+      for (let vane = 0; vane < vaneCount; vane += 1) {
+        const xM = rowOffsetX - rowWidth / 2 + 0.45 + vane * ((rowWidth - 0.9) / Math.max(1, vaneCount - 1));
+        const localPanel = localPanelAt(row, xM);
+        const turbulenceRatio = localPanel.turbulencePercent / 100;
+        const pressureKpa = dynamicPressureKpa * normalPressureFactor * 1.15
+          * gustFactorAt(turbulenceRatio) * edgeFactorAt(xM, config.vaneLengthM);
+        const projectedAreaM2 = 0.72 * config.vaneLengthM;
+        const forceKn = pressureKpa * projectedAreaM2;
+        const excitationFrequencyHz = 0.16 * normalSpeed / 0.72;
+        const responseGain = harmonicResponseGain(excitationFrequencyHz, 5.5, 1.5);
+        elements.push({
+          row,
+          element: vane + 1,
+          xM,
+          projectedAreaM2,
+          pressureKpa,
+          forceKn,
+          attachmentLoadKn: forceKn,
+          overturningMomentKnM: forceKn * 0.36,
+          excitationFrequencyHz,
+          vibrationIndex: deviceVibrationIndex(pressureKpa, dynamicPressureKpa, turbulenceRatio, responseGain),
+        });
+      }
+    }
+    return summarizeMitigationRows(
+      "vanes",
+      "vane",
+      "Crosswind drag on each under-panel vane; the value is its total attachment-line demand. Vibration assumes 5.5 Hz and 1.5% damping.",
+      elements,
+    );
+  }
+
+  if (config.mitigation === "spoilers") {
+    const styleSolidity = { perforated: 0.62, continuous: 1, tabs: 0.42 }[config.spoilerStyle];
+    const dragCoefficient = 0.25 + 1.05 * Math.pow(styleSolidity, 0.8);
+    const angleRad = config.spoilerAngleDeg * RAD;
+    const normalRatio = clamp(Math.abs(flow.z * Math.cos(angleRad)) + Math.abs(Math.sin(angleRad)) * 0.25, 0, 1);
+    const normalSpeed = speedMs * normalRatio;
+    const normalPressureFactor = 0.06 + 0.94 * normalRatio * normalRatio;
+    for (let row = 1; row <= geometry.rows.length; row += 1) {
+      if (!rowIsInRange(row, config.spoilerStartRow, config.spoilerEndRow, geometry.rows.length)) continue;
+      const rowConfig = geometry.rows[row - 1];
+      const rowOffsetX = getRowOffsetX(row, geometry);
+      for (let column = 0; column < rowConfig.columns; column += 1) {
+        const xM = rowOffsetX + (column - (rowConfig.columns - 1) / 2) * metrics.modulePitchM;
+        const localPanel = localPanelAt(row, xM);
+        const turbulenceRatio = localPanel.turbulencePercent / 100;
+        const pressureKpa = dynamicPressureKpa * normalPressureFactor * dragCoefficient
+          * gustFactorAt(turbulenceRatio) * edgeFactorAt(xM, config.spoilerHeightM * 5);
+        const projectedAreaM2 = metrics.modulePitchM * config.spoilerHeightM * styleSolidity;
+        const forceKn = pressureKpa * projectedAreaM2;
+        const excitationFrequencyHz = 0.16 * normalSpeed / Math.max(0.08, config.spoilerHeightM);
+        const responseGain = harmonicResponseGain(excitationFrequencyHz, 7, 1.5);
+        elements.push({
+          row,
+          element: column + 1,
+          xM,
+          projectedAreaM2,
+          pressureKpa,
+          forceKn,
+          attachmentLoadKn: forceKn / 2,
+          overturningMomentKnM: forceKn * config.spoilerHeightM / 4,
+          excitationFrequencyHz,
+          vibrationIndex: deviceVibrationIndex(pressureKpa, dynamicPressureKpa, turbulenceRatio, responseGain),
+        });
+      }
+    }
+    return summarizeMitigationRows(
+      "spoilers",
+      "deflector bay",
+      "Drag on each module-width deflector bay; two edge attachments share each bay load. Vibration assumes 7 Hz and 1.5% damping.",
+      elements,
+    );
+  }
+
+  for (let row = 1; row <= geometry.rows.length; row += 1) {
+    if (!rowIsInRange(row, config.damperStartRow, config.damperEndRow, geometry.rows.length)) continue;
+    const rowWidth = getRowWidth(row, geometry);
+    const rowOffsetX = getRowOffsetX(row, geometry);
+    const dampersPerRail = Math.max(2, Math.ceil(rowWidth / config.damperSpacingM) + 1);
+    const tributaryWidthM = rowWidth / Math.max(1, dampersPerRail - 1);
+    for (let rail = 0; rail < 4; rail += 1) {
+      for (let damper = 0; damper < dampersPerRail; damper += 1) {
+        const xM = rowOffsetX - rowWidth / 2 + damper * (rowWidth / Math.max(1, dampersPerRail - 1));
+        const localPanel = localPanelAt(row, xM);
+        const projectedAreaM2 = tributaryWidthM * metrics.tableChordM / 4;
+        const forceKn = localPanel.peakUpliftKpa * projectedAreaM2;
+        elements.push({
+          row,
+          element: rail * dampersPerRail + damper + 1,
+          xM,
+          projectedAreaM2,
+          pressureKpa: localPanel.peakUpliftKpa,
+          forceKn,
+          attachmentLoadKn: forceKn,
+          overturningMomentKnM: 0,
+          excitationFrequencyHz: panelSheddingFrequencyHz,
+          vibrationIndex: localPanel.vibrationIndex,
+        });
+      }
+    }
+  }
+  return summarizeMitigationRows(
+    "dampers",
+    "damper joint",
+    "Panel uplift transfers through each damper tributary area. The vibration value uses the fitted panel response and excludes direct pad drag.",
+    elements,
+  );
+}
+
 export function simulate(config: SimulationConfig): SimulationResult {
   const geometry = config.geometry;
   const metrics = getArrayMetrics(geometry);
@@ -407,7 +695,8 @@ export function simulate(config: SimulationConfig): SimulationResult {
   const vibration = rows.reduce((current, row) => Math.max(current, row.vibrationIndex), 0);
   const front = rows[0].peakUpliftKpa;
   const rear = rows[rows.length - 1].peakUpliftKpa;
-  return { dynamicPressureKpa, sheddingFrequencyHz, peakUpliftKpa: peak.peakUpliftKpa, peakRow: peak.row, peakColumn: peak.column, peakModule: peak.module, vibrationIndex: vibration, frontRearRatio: rear > 0 ? front / rear : 1, alignmentPercent, rows };
+  const mitigationLoad = simulateMitigationLoads(config, rows, dynamicPressureKpa, speedMs, flow, sheddingFrequencyHz);
+  return { dynamicPressureKpa, sheddingFrequencyHz, peakUpliftKpa: peak.peakUpliftKpa, peakRow: peak.row, peakColumn: peak.column, peakModule: peak.module, vibrationIndex: vibration, frontRearRatio: rear > 0 ? front / rear : 1, alignmentPercent, rows, mitigationLoad };
 }
 
 export function riskColor(value: number, max = 100) {
