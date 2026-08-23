@@ -63,6 +63,56 @@ type FlowSample = {
   turbulence: number;
 };
 
+type ImmediatePanelState = "intact" | "attached" | "displaced" | "missing";
+
+const PHOTO_DAMAGE_INVENTORY: Record<1 | 2, { attached: Set<number>; displaced: Set<number> }> = {
+  1: {
+    attached: new Set([1, 2, 3, 6, 7, 10, 11, 15, 16, 17, 20, 21]),
+    displaced: new Set([13, 14, 23, 24, 27, 28]),
+  },
+  2: {
+    attached: new Set([1, 2, 3, 4, 5, 9, 10, 11, 12, 15, 16, 17, 18, 21, 22, 23, 24, 27, 28, 29, 30, 33, 34, 35]),
+    displaced: new Set([36, 40, 41, 42, 43, 46, 47, 48, 49, 52, 53, 54, 56]),
+  },
+};
+
+const PHOTO_DAMAGE_DOWNHILL = new Set(["1:14", "1:24", "1:28", "2:40", "2:46", "2:47", "2:52", "2:53", "2:56"]);
+const PHOTO_DAMAGE_UPRIGHT = new Set(["1:13", "2:41", "2:42", "2:43"]);
+const PHOTO_DAMAGE_FOLDED = new Set(["1:23", "1:27", "2:48", "2:49", "2:54"]);
+
+function getImmediatePanelState(
+  row: number,
+  module: number,
+  columns: number,
+  panelsDeep: number,
+): ImmediatePanelState {
+  if (row > 2) return "intact";
+  const isPhotoDefault = panelsDeep === 2 && ((row === 1 && columns === 14) || (row === 2 && columns === 28));
+  if (isPhotoDefault) {
+    const inventory = PHOTO_DAMAGE_INVENTORY[row as 1 | 2];
+    if (inventory.attached.has(module)) return "attached";
+    if (inventory.displaced.has(module)) return "displaced";
+    return "missing";
+  }
+
+  const presentRatio = row === 1 ? 18 / 28 : 37 / 56;
+  const attachedRatio = row === 1 ? 12 / 18 : 24 / 37;
+  if (hash(row * 1000 + module) > presentRatio) return "missing";
+  return hash(row * 2000 + module) < attachedRatio ? "attached" : "displaced";
+}
+
+function getImmediateInventory(rows: Array<{ columns: number; panelsDeep: number }>) {
+  const counts = { attached: 0, displaced: 0, missing: 0 };
+  rows.slice(0, 2).forEach((row, rowIndex) => {
+    const rowNumber = rowIndex + 1;
+    for (let moduleNumber = 1; moduleNumber <= row.columns * row.panelsDeep; moduleNumber += 1) {
+      const state = getImmediatePanelState(rowNumber, moduleNumber, row.columns, row.panelsDeep);
+      if (state !== "intact") counts[state] += 1;
+    }
+  });
+  return { ...counts, visible: counts.attached + counts.displaced };
+}
+
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 const approximateGaussian = () =>
   (Math.random() + Math.random() + Math.random() + Math.random() - 2) * 1.73;
@@ -109,17 +159,26 @@ function makeGroundTexture(renderer: THREE.WebGLRenderer) {
   canvas.height = 512;
   const context = canvas.getContext("2d");
   if (!context) return null;
-  context.fillStyle = "#343f3d";
+  context.fillStyle = "#676460";
   context.fillRect(0, 0, 512, 512);
-  for (let index = 0; index < 13500; index += 1) {
-    const value = 52 + Math.floor(Math.random() * 42);
-    context.fillStyle = `rgba(${value - 8}, ${value}, ${value - 2}, ${0.18 + Math.random() * 0.48})`;
-    const size = 0.4 + Math.random() * 1.8;
-    context.fillRect(Math.random() * 512, Math.random() * 512, size, size);
+  const gravelColors = [
+    [46, 45, 44],
+    [73, 71, 69],
+    [92, 89, 86],
+    [118, 114, 108],
+  ];
+  for (let index = 0; index < 22000; index += 1) {
+    const color = gravelColors[Math.floor(Math.random() * gravelColors.length)];
+    context.fillStyle = `rgba(${color[0]}, ${color[1]}, ${color[2]}, ${0.34 + Math.random() * 0.58})`;
+    const width = 0.55 + Math.random() * 2.4;
+    const height = 0.45 + Math.random() * 1.55;
+    context.beginPath();
+    context.ellipse(Math.random() * 512, Math.random() * 512, width, height, Math.random() * Math.PI, 0, Math.PI * 2);
+    context.fill();
   }
   const texture = new THREE.CanvasTexture(canvas);
   texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
-  texture.repeat.set(8, 8);
+  texture.repeat.set(14, 11);
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
   return texture;
@@ -242,6 +301,7 @@ export function WindScene({
 }: WindSceneProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const geometryKey = JSON.stringify(config.geometry);
+  const immediateInventory = getImmediateInventory(config.geometry.rows);
   const liveRef = useRef({
     config,
     result,
@@ -338,21 +398,22 @@ export function WindScene({
     const gravelDepth = (rowCount - 1) * rowSpacingM + tableChordM + 12;
     const gravelCenterZ = 0.8;
     const gravelMinX = arrayBounds.minX - 7;
-    const wallX = arrayBounds.maxX + 3;
-    const gravelWidth = wallX - gravelMinX;
-    const gravelCenterX = (gravelMinX + wallX) / 2;
+    const wallBaseX = arrayBounds.maxX + 3;
     const gravelMinZ = gravelCenterZ - gravelDepth / 2;
     const gravelMaxZ = gravelCenterZ + gravelDepth / 2;
     const wallDepth = gravelDepth + 3;
     const wallMinZ = gravelCenterZ - wallDepth / 2;
     const wallMaxZ = gravelCenterZ + wallDepth / 2;
     const retainedHillWidth = 84;
+    const wallProgressAt = (z: number) => clamp((z - wallMinZ) / wallDepth, 0, 1);
+    const wallXAt = (z: number) => wallBaseX + Math.sin(wallProgressAt(z) * Math.PI) * 1.1;
     const wallTopHeightAt = (z: number) => {
-      const rearProgress = clamp((wallMaxZ - z) / wallDepth, 0, 1);
-      return 0.62 + rearProgress * 0.5;
+      const arch = Math.sin(wallProgressAt(z) * Math.PI);
+      return 0.58 + Math.pow(Math.max(0, arch), 0.82) * 0.56;
     };
     const retainedHillHeightAt = (x: number, z: number) => {
-      const crossProgress = clamp((x - wallX) / retainedHillWidth, 0, 1);
+      const localWallX = wallXAt(z);
+      const crossProgress = clamp((x - localWallX) / retainedHillWidth, 0, 1);
       const rearProgress = clamp((wallMaxZ - z) / wallDepth, 0, 1);
       const roundedRise = Math.sin(crossProgress * Math.PI) * (1.25 + rearProgress * 0.48);
       const crown = Math.sin(rearProgress * Math.PI) * 0.18;
@@ -364,7 +425,7 @@ export function WindScene({
       const makaiDrop = Math.max(0, z - gravelMaxZ) * 0.055;
       const maukaRise = Math.max(0, gravelMinZ - z) * 0.006;
       const lowerSlope = -0.08 - leftDrop - makaiDrop + maukaRise;
-      if (x <= wallX) return lowerSlope;
+      if (x <= wallXAt(z)) return lowerSlope;
 
       const endDistance = z < wallMinZ ? wallMinZ - z : z > wallMaxZ ? z - wallMaxZ : 0;
       const wallInfluence = Math.exp(-Math.pow(endDistance / 15, 2));
@@ -374,7 +435,7 @@ export function WindScene({
     const fieldWidth = 240;
     const fieldDepth = 155;
     const fieldCenterZ = -23;
-    const fieldGeometry = new THREE.PlaneGeometry(fieldWidth, fieldDepth, 48, 42);
+    const fieldGeometry = new THREE.PlaneGeometry(fieldWidth, fieldDepth, 72, 56);
     const fieldPositions = fieldGeometry.attributes.position as THREE.BufferAttribute;
     for (let index = 0; index < fieldPositions.count; index += 1) {
       const worldX = arrayCenterX + fieldPositions.getX(index);
@@ -392,14 +453,68 @@ export function WindScene({
     field.receiveShadow = true;
     scene.add(field);
 
+    const gravelSegments = 42;
+    const gravelPositions: number[] = [];
+    const gravelUvs: number[] = [];
+    const gravelIndices: number[] = [];
+    for (let segment = 0; segment <= gravelSegments; segment += 1) {
+      const progress = segment / gravelSegments;
+      const z = gravelMinZ + progress * gravelDepth;
+      const rightX = wallXAt(z);
+      gravelPositions.push(gravelMinX, -0.035, z, rightX, -0.035, z);
+      gravelUvs.push(0, progress, 1, progress);
+      if (segment < gravelSegments) {
+        const start = segment * 2;
+        gravelIndices.push(start, start + 2, start + 1, start + 1, start + 2, start + 3);
+      }
+    }
+    const gravelGeometry = new THREE.BufferGeometry();
+    gravelGeometry.setAttribute("position", new THREE.Float32BufferAttribute(gravelPositions, 3));
+    gravelGeometry.setAttribute("uv", new THREE.Float32BufferAttribute(gravelUvs, 2));
+    gravelGeometry.setIndex(gravelIndices);
+    gravelGeometry.computeVertexNormals();
     const ground = new THREE.Mesh(
-      new THREE.PlaneGeometry(gravelWidth, gravelDepth, 1, 1),
-      new THREE.MeshStandardMaterial({ map: groundTexture, color: 0x5a615d, roughness: 0.99, metalness: 0.01 }),
+      gravelGeometry,
+      new THREE.MeshStandardMaterial({
+        map: groundTexture,
+        bumpMap: groundTexture,
+        bumpScale: 0.075,
+        color: 0xa7a29c,
+        roughness: 1,
+        metalness: 0,
+      }),
     );
-    ground.rotation.x = -Math.PI / 2;
-    ground.position.set(gravelCenterX, -0.035, gravelCenterZ);
     ground.receiveShadow = true;
     scene.add(ground);
+
+    const hillApronPositions: number[] = [];
+    const hillApronUvs: number[] = [];
+    const hillApronIndices: number[] = [];
+    for (let segment = 0; segment <= gravelSegments; segment += 1) {
+      const progress = segment / gravelSegments;
+      const z = wallMinZ + progress * wallDepth;
+      const edgeX = wallXAt(z);
+      hillApronPositions.push(
+        edgeX + 0.12, wallTopHeightAt(z) + 0.015, z,
+        edgeX + 3.2, retainedHillHeightAt(edgeX + 3.2, z) + 0.015, z,
+      );
+      hillApronUvs.push(0, progress, 1, progress);
+      if (segment < gravelSegments) {
+        const start = segment * 2;
+        hillApronIndices.push(start, start + 1, start + 2, start + 1, start + 3, start + 2);
+      }
+    }
+    const hillApronGeometry = new THREE.BufferGeometry();
+    hillApronGeometry.setAttribute("position", new THREE.Float32BufferAttribute(hillApronPositions, 3));
+    hillApronGeometry.setAttribute("uv", new THREE.Float32BufferAttribute(hillApronUvs, 2));
+    hillApronGeometry.setIndex(hillApronIndices);
+    hillApronGeometry.computeVertexNormals();
+    const hillApron = new THREE.Mesh(
+      hillApronGeometry,
+      new THREE.MeshStandardMaterial({ map: fieldTexture, color: 0x91854c, roughness: 1 }),
+    );
+    hillApron.receiveShadow = true;
+    scene.add(hillApron);
 
     const ocean = new THREE.Mesh(
       new THREE.PlaneGeometry(260, 92),
@@ -453,7 +568,7 @@ export function WindScene({
       const { column, layer, layers, z } = wallStoneData[index];
       const top = wallTopHeightAt(z);
       stone.position.set(
-        wallX + (hash(index + 900) - 0.5) * 0.58,
+        wallXAt(z) + (hash(index + 900) - 0.5) * 0.58,
         (layer + 0.52) * (top / layers) + hash(index + 930) * 0.035,
         z + (hash(index + 960) - 0.5) * 0.22,
       );
@@ -537,23 +652,30 @@ export function WindScene({
           glass.receiveShadow = true;
           glass.userData = { row: rowNumber, module: moduleNumber };
           assembly.add(glass);
-          const immediateDamaged = rowNumber <= 2;
-          const immediateMissing = rowNumber === 1
-            ? moduleNumber % 4 === 0 || moduleNumber % 7 === 0
-            : rowNumber === 2
-              ? moduleNumber % 4 === 0 || moduleNumber % 9 === 0
-              : false;
-          const immediatePresent = !immediateMissing;
+          const immediateState = getImmediatePanelState(rowNumber, moduleNumber, rowColumns, rowConfig.panelsDeep);
+          const immediateDamaged = immediateState === "displaced";
+          const immediatePresent = immediateState !== "missing";
           const immediatePosition = assembly.position.clone();
           const immediateRotation = new THREE.Euler(tilt, 0, 0);
           if (immediateDamaged) {
-            const downhill = immediatePresent && (moduleNumber % 11 === 0 || moduleNumber % 17 === 0);
-            const upright = immediatePresent && !downhill && (moduleNumber % 19 === 0 || (rowNumber === 1 && moduleNumber === 13));
-            const stillAttached = immediatePresent && !downhill && !upright && moduleNumber % 3 === 1;
-            const folded = immediatePresent && !downhill && !upright && !stillAttached && moduleNumber % 7 === 0;
+            const damageKey = `${rowNumber}:${moduleNumber}`;
+            const photoDefaultRow = rowConfig.panelsDeep === 2
+              && ((rowNumber === 1 && rowColumns === 14) || (rowNumber === 2 && rowColumns === 28));
+            const downhill = photoDefaultRow
+              ? PHOTO_DAMAGE_DOWNHILL.has(damageKey)
+              : moduleNumber % 5 === 0;
+            const upright = photoDefaultRow
+              ? PHOTO_DAMAGE_UPRIGHT.has(damageKey)
+              : !downhill && moduleNumber % 7 === 0;
+            const folded = photoDefaultRow
+              ? PHOTO_DAMAGE_FOLDED.has(damageKey)
+              : !downhill && !upright && moduleNumber % 3 === 0;
             if (downhill) {
-              immediatePosition.x = gravelMinX + 1.5 + hash(moduleNumber + rowNumber * 47) * (gravelWidth - 3);
-              if (moduleNumber % 17 === 0) immediatePosition.x = gravelMinX - 1.2 - hash(moduleNumber + 191) * 3.8;
+              const gravelWidthAtFront = wallXAt(gravelMaxZ) - gravelMinX;
+              immediatePosition.x = gravelMinX + 1.5 + hash(moduleNumber + rowNumber * 47) * (gravelWidthAtFront - 3);
+              if (moduleNumber === 24 || moduleNumber === 47 || moduleNumber === 53) {
+                immediatePosition.x = gravelMinX - 1.2 - hash(moduleNumber + 191) * 3.8;
+              }
               immediatePosition.z = gravelMaxZ + 1.5 + hash(moduleNumber + rowNumber * 71) * 7.5;
               immediatePosition.y = siteTerrainHeightAt(immediatePosition.x, immediatePosition.z) + 0.09;
               immediateRotation.set(
@@ -569,15 +691,6 @@ export function WindScene({
                 THREE.MathUtils.degToRad(78 + hash(moduleNumber + 391) * 9),
                 (hash(moduleNumber + 421) - 0.5) * 0.42,
                 (hash(moduleNumber + 451) - 0.5) * 0.28,
-              );
-            } else if (stillAttached) {
-              immediatePosition.x += (hash(moduleNumber + rowNumber * 97) - 0.5) * 0.5;
-              immediatePosition.z += (hash(moduleNumber + 481) - 0.5) * 0.7;
-              immediatePosition.y -= 0.04 + hash(moduleNumber + 511) * 0.12;
-              immediateRotation.set(
-                tilt + THREE.MathUtils.degToRad((hash(moduleNumber + 541) - 0.5) * 12),
-                (hash(moduleNumber + 571) - 0.5) * 0.2,
-                (hash(moduleNumber + 601) - 0.5) * 0.16,
               );
             } else {
               immediatePosition.x += (hash(moduleNumber + rowNumber * 107) - 0.5) * 2.6;
@@ -1394,6 +1507,11 @@ export function WindScene({
               : `SCREENS BEHIND ROWS ${config.screenStartRow}–${config.screenEndRow}`
             : MITIGATIONS[config.mitigation].short}
         </strong>
+        {arrayState === "immediate" ? (
+          <strong>
+            {immediateInventory.visible} PHOTO-VISIBLE · {immediateInventory.attached} IN PLACE · {immediateInventory.displaced} DISPLACED · {immediateInventory.missing} OFF-SITE
+          </strong>
+        ) : null}
       </div>
       <div className="scene-drag-hint">Drag to orbit · Scroll to zoom · Select a panel</div>
     </div>
