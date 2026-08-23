@@ -37,6 +37,7 @@ import {
   type ArrayGeometryConfig,
 } from "../lib/array-config";
 import {
+  MITIGATION_BASE_COLOR,
   MITIGATIONS,
   SCENARIOS,
   cardinalDirection,
@@ -336,7 +337,7 @@ export function WindLab() {
           {mitigation !== "none" ? (
             <div
               className="mitigation-visual-key"
-              style={{ "--concept-accent": MITIGATIONS[mitigation].color } as React.CSSProperties}
+              style={{ "--concept-accent": MITIGATION_BASE_COLOR } as React.CSSProperties}
             >
               <i />
               <span>
@@ -345,7 +346,7 @@ export function WindLab() {
                   ? `Element colors · ${result.mitigationLoad.peakPressureKpa.toFixed(2)} kPa device peak`
                   : colorCodeMitigations && viewMode === "vibration" && result.mitigationLoad
                     ? `Element colors + motion · ${result.mitigationLoad.peakVibrationIndex.toFixed(0)} / 100 device peak`
-                    : `Bright ${MITIGATIONS[mitigation].colorName} geometry in the model`}
+                    : "Bright magenta geometry in the model"}
               </span>
             </div>
           ) : null}
@@ -528,7 +529,7 @@ export function WindLab() {
             >
               <div className="tuning-heading">
                 <span><i /> Visible concept controls</span>
-                <small>{MITIGATIONS[mitigation].colorName}</small>
+                <small>magenta model</small>
               </div>
 
               {mitigation === "screen" ? (
@@ -709,6 +710,7 @@ export function WindLab() {
 
           {result.mitigationLoad ? (
             <DeviceLoadPanel
+              key={result.mitigationLoad.concept}
               load={result.mitigationLoad}
               color={MITIGATIONS[mitigation].color}
             />
@@ -893,43 +895,56 @@ export function WindLab() {
 }
 
 function DeviceLoadPanel({ load, color }: { load: MitigationLoadResult; color: string }) {
+  const [expanded, setExpanded] = useState(false);
   return (
     <section className="device-load-card" style={{ "--concept-accent": color } as React.CSSProperties}>
-      <div className="device-load-head">
+      <button
+        type="button"
+        className="device-load-head"
+        aria-expanded={expanded}
+        onClick={() => setExpanded((value) => !value)}
+      >
         <div>
           <span className="eyebrow">ADDED HARDWARE DEMAND</span>
           <strong>{load.elementCount} modeled {load.elementLabel}{load.elementCount === 1 ? "" : "s"}</strong>
         </div>
-        <Wrench size={17} />
-      </div>
-      <div className="device-load-values">
-        <span><small>Peak pressure</small><strong>{load.peakPressureKpa.toFixed(2)} kPa</strong></span>
-        <span><small>Peak attachment</small><strong>{load.peakAttachmentLoadKn.toFixed(2)} kN</strong></span>
-        <span><small>Device vibration</small><strong>{load.peakVibrationIndex.toFixed(0)} / 100</strong></span>
-      </div>
-      <div className="device-row-loads" role="table" aria-label="Mitigation demand by row">
-        <div role="row" className="device-row-head">
-          <span role="columnheader">Row</span>
-          <span role="columnheader">Elements</span>
-          <span role="columnheader">Total force</span>
-          <span role="columnheader">Peak attachment</span>
-          <span role="columnheader">Vibration</span>
-        </div>
-        {load.rows.map((row) => (
-          <div role="row" key={row.row}>
-            <strong role="cell">{row.row}</strong>
-            <span role="cell">{row.elementCount}</span>
-            <span role="cell">{row.totalForceKn.toFixed(1)} kN</span>
-            <span role="cell">{row.peakAttachmentLoadKn.toFixed(2)} kN</span>
-            <span role="cell">{row.peakVibrationIndex.toFixed(0)}</span>
+        <span className="device-load-head-icons" aria-hidden="true">
+          <Wrench size={17} />
+          <ChevronDown size={14} />
+        </span>
+      </button>
+      <div className={`device-load-body ${expanded ? "expanded" : ""}`} aria-hidden={!expanded}>
+        <div className="device-load-body-inner">
+          <div className="device-load-values">
+            <span><small>Peak pressure</small><strong>{load.peakPressureKpa.toFixed(2)} kPa</strong></span>
+            <span><small>Peak attachment</small><strong>{load.peakAttachmentLoadKn.toFixed(2)} kN</strong></span>
+            <span><small>Device vibration</small><strong>{load.peakVibrationIndex.toFixed(0)} / 100</strong></span>
           </div>
-        ))}
+          <div className="device-row-loads" role="table" aria-label="Mitigation demand by row">
+            <div role="row" className="device-row-head">
+              <span role="columnheader">Row</span>
+              <span role="columnheader">Elements</span>
+              <span role="columnheader">Total force</span>
+              <span role="columnheader">Peak attachment</span>
+              <span role="columnheader">Vibration</span>
+            </div>
+            {load.rows.map((row) => (
+              <div role="row" key={row.row}>
+                <strong role="cell">{row.row}</strong>
+                <span role="cell">{row.elementCount}</span>
+                <span role="cell">{row.totalForceKn.toFixed(1)} kN</span>
+                <span role="cell">{row.peakAttachmentLoadKn.toFixed(2)} kN</span>
+                <span role="cell">{row.peakVibrationIndex.toFixed(0)}</span>
+              </div>
+            ))}
+          </div>
+          <p>{load.loadBasis}</p>
+          {load.peakOverturningMomentKnM > 0 ? (
+            <p>Peak support moment: {load.peakOverturningMomentKnM.toFixed(2)} kN·m at Row {load.peakRow}, {load.elementLabel} {load.peakElement}.</p>
+          ) : null}
+          <p className="device-load-caution">Demand only. Add material, anchor, and fatigue capacities before any pass/fail decision.</p>
+        </div>
       </div>
-      <p>{load.loadBasis}</p>
-      {load.peakOverturningMomentKnM > 0 ? (
-        <p>Peak support moment: {load.peakOverturningMomentKnM.toFixed(2)} kN·m at Row {load.peakRow}, {load.elementLabel} {load.peakElement}.</p>
-      ) : null}
-      <p className="device-load-caution">Demand only. Add material, anchor, and fatigue capacities before any pass/fail decision.</p>
     </section>
   );
 }

@@ -5,6 +5,7 @@ import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { getArrayMetrics } from "../lib/array-config";
 import {
+  MITIGATION_BASE_COLOR,
   MITIGATIONS,
   getArrayBounds,
   getFlowComponents,
@@ -253,35 +254,40 @@ type TextSpriteStyle = "default" | "accent" | "selection";
 
 function makeTextSprite(text: string, style: TextSpriteStyle = "default") {
   const canvas = document.createElement("canvas");
-  canvas.width = 512;
   canvas.height = 128;
-  const context = canvas.getContext("2d");
+  let context = canvas.getContext("2d");
   if (!context) return new THREE.Sprite();
   const accent = style === "accent";
   const selection = style === "selection";
+  const font = "600 42px Arial";
+  context.font = font;
+  canvas.width = Math.min(1536, Math.max(320, Math.ceil(context.measureText(text).width + 72)));
+  context = canvas.getContext("2d");
+  if (!context) return new THREE.Sprite();
   context.fillStyle = selection
     ? "rgba(255, 231, 106, .96)"
     : accent
-      ? "rgba(119, 246, 197, .92)"
-      : "rgba(7, 17, 24, .82)";
+      ? "rgba(119, 246, 197, .74)"
+      : "rgba(7, 17, 24, .62)";
   context.beginPath();
-  context.roundRect(8, 8, 496, 112, 20);
+  context.roundRect(8, 8, canvas.width - 16, 112, 20);
   context.fill();
   context.strokeStyle = selection
     ? "rgba(255, 250, 206, .96)"
     : accent
-      ? "rgba(215, 255, 240, .8)"
-      : "rgba(134, 211, 230, .45)";
+      ? "rgba(215, 255, 240, .62)"
+      : "rgba(134, 211, 230, .32)";
   context.lineWidth = 3;
   context.stroke();
   context.fillStyle = selection || accent ? "#07130f" : "#dffaff";
-  context.font = "600 42px Arial";
+  context.font = font;
   context.textAlign = "center";
   context.textBaseline = "middle";
-  context.fillText(text, 256, 66);
+  context.fillText(text, canvas.width / 2, 66);
   const material = new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(canvas), transparent: true });
   const sprite = new THREE.Sprite(material);
-  sprite.scale.set(5.8, 1.45, 1);
+  const worldHeight = selection ? 0.98 : 1.22;
+  sprite.scale.set(worldHeight * canvas.width / canvas.height, worldHeight, 1);
   return sprite;
 }
 
@@ -702,8 +708,7 @@ export function WindScene({
 
       const rowPosition = rowNumber === 1 ? " · FRONT" : rowNumber === rowCount ? " · REAR" : "";
       const label = makeTextSprite(`ROW ${rowNumber}${rowPosition} · ${rowColumns * rowConfig.panelsDeep} PANELS`);
-      label.position.set(rowOffsetX - rowWidth / 2 - 3.35, 1.15, z);
-      label.scale.set(4.9, 1.22, 1);
+      label.position.set(rowOffsetX - rowWidth / 2 - label.scale.x / 2 - 0.9, 1.15, z);
       arrayGroup.add(label);
       sceneLabels.push(label);
     }
@@ -746,7 +751,6 @@ export function WindScene({
     }
     const selectionTag = makeTextSprite("SELECTED PANEL", "selection");
     selectionTag.position.set(0, 1.15, 0);
-    selectionTag.scale.set(3.9, 0.98, 1);
     selectionTag.renderOrder = 31;
     selectionMarker.add(selectionTag);
     selectionMarker.visible = false;
@@ -760,40 +764,36 @@ export function WindScene({
     scene.add(bearingDisc);
 
     const mitigationGroups: Record<string, THREE.Group> = {};
+    const mitigationBaseColor = new THREE.Color(MITIGATION_BASE_COLOR);
+    const mitigationBaseEmissive = new THREE.Color(0xc40083);
     const screenMaterial = new THREE.MeshStandardMaterial({
-      color: 0x7df0c5,
+      color: mitigationBaseColor,
       metalness: 0.2,
       roughness: 0.38,
-      emissive: 0x1e8f6b,
+      emissive: mitigationBaseEmissive,
       emissiveIntensity: 1.3,
     });
     const vaneMaterial = new THREE.MeshStandardMaterial({
-      color: 0x5ddcff,
+      color: mitigationBaseColor,
       metalness: 0.25,
       roughness: 0.32,
-      emissive: 0x176f91,
+      emissive: mitigationBaseEmissive,
       emissiveIntensity: 1.45,
     });
     const spoilerMaterial = new THREE.MeshStandardMaterial({
-      color: 0xff9b57,
+      color: mitigationBaseColor,
       metalness: 0.2,
       roughness: 0.36,
-      emissive: 0x9a3d0a,
+      emissive: mitigationBaseEmissive,
       emissiveIntensity: 1.55,
     });
     const damperMaterial = new THREE.MeshStandardMaterial({
-      color: 0xff66d8,
+      color: mitigationBaseColor,
       roughness: 0.3,
-      emissive: 0xc40083,
+      emissive: mitigationBaseEmissive,
       emissiveIntensity: 2.4,
     });
     type DeviceConcept = Exclude<MitigationId, "none">;
-    const deviceBaseColors: Record<DeviceConcept, THREE.Color> = {
-      screen: new THREE.Color(0x7df0c5),
-      vanes: new THREE.Color(0x5ddcff),
-      spoilers: new THREE.Color(0xff9b57),
-      dampers: new THREE.Color(0xff66d8),
-    };
     const deviceMaterialVisuals: Array<{
       concept: DeviceConcept;
       row: number;
@@ -1355,9 +1355,8 @@ export function WindScene({
             ? activeElements.get(`${row}:${element}`)
             : undefined;
           if (!loadColoringActive || !elementLoad) {
-            const baseColor = deviceBaseColors[concept];
-            material.color.copy(baseColor);
-            material.emissive.copy(baseColor).multiplyScalar(0.5);
+            material.color.copy(mitigationBaseColor);
+            material.emissive.copy(mitigationBaseEmissive);
             material.emissiveIntensity = concept === "dampers" ? 2.4 : 1.35;
             return;
           }

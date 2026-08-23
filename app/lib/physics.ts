@@ -443,6 +443,8 @@ export type SimulationResult = {
   mitigationLoad: MitigationLoadResult | null;
 };
 
+export const MITIGATION_BASE_COLOR = "#ff66d8";
+
 export const MITIGATIONS: Record<MitigationId, { label: string; short: string; detail: string; color: string; colorName: string }> = {
   none: { label: "Baseline array", short: "No intervention", detail: "Current open-rack geometry with no added flow control.", color: "#8fa4aa", colorName: "gray" },
   screen: { label: "Porous wind screen", short: "Rows 7–7", detail: "Full-array-width porous screens sit behind each row in the selected range.", color: "#7df0c5", colorName: "green" },
