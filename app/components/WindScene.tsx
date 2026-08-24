@@ -12,6 +12,7 @@ import {
   getFlowComponents,
   getInstalledScreenRows,
   isMitigationActive,
+  getArrayPanelCentroid,
   getPanelResult,
   pressureColor,
   riskColor,
@@ -370,6 +371,10 @@ export function WindScene({
     const tilt = THREE.MathUtils.degToRad(geometry.tiltDeg);
     const arrayBounds = getArrayBounds(geometry);
     const arrayCenterX = arrayBounds.centerX;
+    const arrayPanelCentroid = getArrayPanelCentroid(geometry);
+    const rowCentersZ = geometry.rows.map((_, index) => getRowCenterZ(index + 1, geometry));
+    const arrayFootprintDepth = Math.max(...rowCentersZ) - Math.min(...rowCentersZ)
+      + tableChordM * Math.cos(tilt);
     const sceneWidth = Math.max(92, arrayBounds.width + 26);
     const sceneDepth = Math.max(84, (rowCount - 1) * rowSpacingM + tableChordM + 28);
     const sceneExtent = Math.max(sceneWidth, sceneDepth);
@@ -760,37 +765,45 @@ export function WindScene({
     selectionMarker.visible = false;
     scene.add(selectionMarker);
 
-    const windMarkerHeight = Math.max(8, wallTopHeightAt(0) + 4.5);
-    const windMarkerLength = Math.min(16, Math.max(11, arrayBounds.width * 0.24));
+    const windMarkerLength = Math.min(
+      42,
+      Math.max(18, Math.hypot(arrayBounds.width, arrayFootprintDepth) * 0.58),
+    );
+    const windMarkerHeadLength = Math.min(8, Math.max(5, windMarkerLength * 0.24));
+    const windMarkerHeadWidth = Math.min(7, Math.max(4.2, windMarkerLength * 0.18));
+    const windMarkerShaftWidth = windMarkerHeadWidth * 0.34;
+    const windMarkerShape = new THREE.Shape();
+    windMarkerShape.moveTo(-windMarkerLength / 2, -windMarkerShaftWidth / 2);
+    windMarkerShape.lineTo(windMarkerLength / 2 - windMarkerHeadLength, -windMarkerShaftWidth / 2);
+    windMarkerShape.lineTo(windMarkerLength / 2 - windMarkerHeadLength, -windMarkerHeadWidth / 2);
+    windMarkerShape.lineTo(windMarkerLength / 2, 0);
+    windMarkerShape.lineTo(windMarkerLength / 2 - windMarkerHeadLength, windMarkerHeadWidth / 2);
+    windMarkerShape.lineTo(windMarkerLength / 2 - windMarkerHeadLength, windMarkerShaftWidth / 2);
+    windMarkerShape.lineTo(-windMarkerLength / 2, windMarkerShaftWidth / 2);
+    windMarkerShape.closePath();
+    const windMarkerGeometry = new THREE.ShapeGeometry(windMarkerShape);
     const directionMaterial = new THREE.MeshBasicMaterial({
       color: 0x7ff1c4,
       transparent: true,
-      opacity: 0.72,
-      depthTest: false,
+      opacity: 0.48,
+      depthTest: true,
+      depthWrite: false,
       fog: false,
+      side: THREE.DoubleSide,
     });
-    const maukaArrow = new THREE.ArrowHelper(
-      new THREE.Vector3(0, 0, 1),
-      new THREE.Vector3(arrayCenterX, windMarkerHeight, 0),
-      windMarkerLength,
-      0x7ff1c4,
-      1.8,
-      1.05,
+    const windDirectionGraphic = new THREE.Group();
+    const windDirectionFill = new THREE.Mesh(windMarkerGeometry, directionMaterial);
+    windDirectionFill.rotation.x = -Math.PI / 2;
+    windDirectionGraphic.add(windDirectionFill);
+    const windDirectionOutline = new THREE.LineSegments(
+      new THREE.EdgesGeometry(windMarkerGeometry),
+      new THREE.LineBasicMaterial({ color: 0xa8ffe0, transparent: true, opacity: 0.76, depthWrite: false }),
     );
-    (maukaArrow.line.material as THREE.LineBasicMaterial).depthTest = false;
-    (maukaArrow.line.material as THREE.LineBasicMaterial).transparent = true;
-    (maukaArrow.line.material as THREE.LineBasicMaterial).opacity = 0.98;
-    (maukaArrow.line.material as THREE.LineBasicMaterial).fog = false;
-    (maukaArrow.cone.material as THREE.MeshBasicMaterial).depthTest = false;
-    (maukaArrow.cone.material as THREE.MeshBasicMaterial).fog = false;
-    maukaArrow.line.renderOrder = 50;
-    maukaArrow.cone.renderOrder = 50;
-    scene.add(maukaArrow);
-    const bearingDisc = new THREE.Mesh(new THREE.RingGeometry(0.72, 1.08, 32), directionMaterial);
-    bearingDisc.rotation.x = -Math.PI / 2;
-    bearingDisc.position.set(arrayCenterX, windMarkerHeight, 0);
-    bearingDisc.renderOrder = 49;
-    scene.add(bearingDisc);
+    windDirectionOutline.rotation.x = -Math.PI / 2;
+    windDirectionOutline.position.y = 0.008;
+    windDirectionGraphic.add(windDirectionOutline);
+    windDirectionGraphic.position.set(arrayPanelCentroid.xM, 0.02, arrayPanelCentroid.zM);
+    scene.add(windDirectionGraphic);
 
     const mitigationGroups: Record<string, THREE.Group> = {};
     const mitigationBaseColor = new THREE.Color(MITIGATION_BASE_COLOR);
@@ -1622,15 +1635,7 @@ export function WindScene({
         panel.assembly.rotation.z = Math.cos(elapsed * Math.PI * 4.4 + phase) * amplitude * 0.62;
       }
 
-      const arrowDirection = new THREE.Vector3(normalizedFlowX, 0, normalizedFlowZ);
-      maukaArrow.setDirection(arrowDirection);
-      maukaArrow.position.set(
-        arrayCenterX - normalizedFlowX * windMarkerLength / 2,
-        windMarkerHeight,
-        -normalizedFlowZ * windMarkerLength / 2,
-      );
-      maukaArrow.setLength(windMarkerLength, 1.8, 1.05);
-      bearingDisc.position.copy(maukaArrow.position);
+      windDirectionGraphic.rotation.y = Math.atan2(-normalizedFlowZ, normalizedFlowX);
 
       controls.update();
       renderer.render(scene, camera);

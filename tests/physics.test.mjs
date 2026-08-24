@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   SCENARIOS,
   getArrayBounds,
+  getArrayPanelCentroid,
   getPanelVisualMotion,
   getRowOffsetX,
   getRowWidth,
@@ -138,6 +139,15 @@ test("resolves every physical panel and column", () => {
   const angled = simulate({ ...baseConfig, windBearing: 60 });
   const rowFourPressures = angled.rows[3].panels.map((panel) => panel.peakUpliftKpa);
   assert.ok(Math.max(...rowFourPressures) - Math.min(...rowFourPressures) > 0.02);
+});
+
+test("centers the wind marker on every panel after layout changes", () => {
+  const geometry = cloneArrayConfig(DEFAULT_ARRAY_CONFIG);
+  geometry.rows = geometry.rows.slice(0, 3).map((row) => ({ ...row, columns: 28, offsetXM: 0 }));
+  const centroid = getArrayPanelCentroid(geometry);
+
+  assert.ok(Math.abs(centroid.xM) < 0.001);
+  assert.ok(Math.abs(centroid.zM - getRowCenterZ(2, geometry)) < 0.001);
 });
 
 test("applies damper damping only to fitted rows", () => {

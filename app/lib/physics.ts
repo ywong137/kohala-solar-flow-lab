@@ -629,6 +629,25 @@ export function getPanelCoordinates(row: number, module: number, geometry = DEFA
   };
 }
 
+export function getArrayPanelCentroid(geometry = DEFAULT_ARRAY_CONFIG) {
+  let panelCount = 0;
+  let xTotalM = 0;
+  let zTotalM = 0;
+  geometry.rows.forEach((rowConfig, rowIndex) => {
+    const modulesInRow = rowConfig.columns * rowConfig.panelsDeep;
+    for (let module = 1; module <= modulesInRow; module += 1) {
+      const coordinates = getPanelCoordinates(rowIndex + 1, module, geometry);
+      xTotalM += coordinates.xM;
+      zTotalM += coordinates.zM;
+      panelCount += 1;
+    }
+  });
+  return {
+    xM: xTotalM / Math.max(1, panelCount),
+    zM: zTotalM / Math.max(1, panelCount),
+  };
+}
+
 export function getPanelResult(result: SimulationResult, row: number, module: number) {
   const rowResult = result.rows[Math.round(clamp(row, 1, result.rows.length)) - 1];
   const safeModule = Math.round(clamp(module, 1, rowResult.panels.length));
