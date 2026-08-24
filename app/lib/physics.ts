@@ -334,6 +334,7 @@ export function resolveSiteFlowBoundary(
 
 export type ViewMode = "flow" | "pressure" | "vibration";
 export type MitigationId = "none" | "screen" | "vanes" | "spoilers" | "dampers";
+export type MitigationConceptId = Exclude<MitigationId, "none">;
 export type SpoilerStyle = "perforated" | "continuous" | "tabs";
 
 export type SimulationConfig = {
@@ -343,7 +344,7 @@ export type SimulationConfig = {
   ambientTurbulence: number;
   panelFrequencyHz: number;
   dampingPercent: number;
-  mitigation: MitigationId;
+  activeMitigations: MitigationConceptId[];
   screenPorosity: number;
   screenHeightM: number;
   screenStartRow: number;
@@ -416,7 +417,7 @@ export type MitigationRowLoad = {
 };
 
 export type MitigationLoadResult = {
-  concept: Exclude<MitigationId, "none">;
+  concept: MitigationConceptId;
   elementLabel: string;
   loadBasis: string;
   elementCount: number;
@@ -440,7 +441,7 @@ export type SimulationResult = {
   frontRearRatio: number;
   alignmentPercent: number;
   rows: RowResult[];
-  mitigationLoad: MitigationLoadResult | null;
+  mitigationLoads: MitigationLoadResult[];
 };
 
 export const MITIGATION_BASE_COLOR = "#ff66d8";
@@ -518,6 +519,10 @@ export function rowIsInRange(row: number, start: number, end: number, rowCount: 
   return row >= range.start && row <= range.end;
 }
 
+export function isMitigationActive(config: SimulationConfig, concept: MitigationConceptId) {
+  return config.activeMitigations.includes(concept);
+}
+
 export function getInstalledScreenRows(config: SimulationConfig) {
   const range = normalizeRowRange(config.screenStartRow, config.screenEndRow, config.geometry.rows.length);
   return Array.from({ length: range.end - range.start + 1 }, (_, index) => range.start + index);
@@ -531,7 +536,7 @@ export function getScreenGeometry(row: number, geometry = DEFAULT_ARRAY_CONFIG) 
 export type ScreenFlowEffects = { pressureFactor: number; speedFactor: number; turbulenceFactor: number; screenCount: number };
 
 export function getScreenFlowEffects(config: SimulationConfig, xM: number, zM: number, flow = getFlowComponents(config.windBearing, config.geometry)): ScreenFlowEffects {
-  if (config.mitigation !== "screen" || Math.abs(flow.z) < 0.08) return { pressureFactor: 1, speedFactor: 1, turbulenceFactor: 1, screenCount: 0 };
+  if (!isMitigationActive(config, "screen") || Math.abs(flow.z) < 0.08) return { pressureFactor: 1, speedFactor: 1, turbulenceFactor: 1, screenCount: 0 };
   const porosity = clamp(config.screenPorosity, 20, 80);
   const solidity = 1 - porosity / 100;
   const height = clamp(config.screenHeightM, 0.8, 3.2);
@@ -570,28 +575,41 @@ type LocalMitigationEffects = { turbulenceFactor: number; pressureFactor: number
 function getLocalMitigationEffects(config: SimulationConfig, row: number): LocalMitigationEffects {
   const rowCount = config.geometry.rows.length;
   const tableChordM = getArrayMetrics(config.geometry).tableChordM;
-  if (config.mitigation === "vanes" && rowIsInRange(row, config.vaneStartRow, config.vaneEndRow, rowCount)) {
+  let turbulenceFactor = 1;
+  let pressureFactor = 1;
+  let dampingBoost = 0;
+  let wakeSourceFactor = 1;
+  if (isMitigationActive(config, "vanes") && rowIsInRange(row, config.vaneStartRow, config.vaneEndRow, rowCount)) {
     const lengthRatio = clamp(config.vaneLengthM / tableChordM, 0.1, 1.5);
     const rackCoverage = Math.min(lengthRatio, 1);
     const extension = Math.max(lengthRatio - 1, 0);
-    const turbulenceFactor = clamp(1 - 0.28 * rackCoverage - 0.05 * extension, 0.62, 0.97);
-    const pressureFactor = clamp(1 - 0.09 * rackCoverage - 0.03 * extension, 0.84, 0.99);
-    return { turbulenceFactor, pressureFactor, dampingBoost: 0, wakeSourceFactor: clamp(0.18 + 0.82 * turbulenceFactor, 0.68, 0.98) };
+    const vaneTurbulenceFactor = clamp(1 - 0.28 * rackCoverage - 0.05 * extension, 0.62, 0.97);
+    const vanePressureFactor = clamp(1 - 0.09 * rackCoverage - 0.03 * extension, 0.84, 0.99);
+    turbulenceFactor *= vaneTurbulenceFactor;
+    pressureFactor *= vanePressureFactor;
+    wakeSourceFactor *= clamp(0.18 + 0.82 * vaneTurbulenceFactor, 0.68, 0.98);
   }
-  if (config.mitigation === "spoilers" && rowIsInRange(row, config.spoilerStartRow, config.spoilerEndRow, rowCount)) {
+  if (isMitigationActive(config, "spoilers") && rowIsInRange(row, config.spoilerStartRow, config.spoilerEndRow, rowCount)) {
     const styleTarget = { perforated: { turbulence: 0.82, pressure: 0.78 }, continuous: { turbulence: 0.78, pressure: 0.72 }, tabs: { turbulence: 0.87, pressure: 0.84 } }[config.spoilerStyle];
     const heightFactor = clamp(config.spoilerHeightM / 0.3, 0.35, 1.7);
     const angleFactor = clamp(Math.cos(RAD * (config.spoilerAngleDeg - 20)), 0.35, 1);
     const effectiveness = clamp(heightFactor * angleFactor, 0.25, 1.45);
-    const turbulenceFactor = clamp(1 - (1 - styleTarget.turbulence) * effectiveness, 0.65, 0.97);
-    const pressureFactor = clamp(1 - (1 - styleTarget.pressure) * effectiveness, 0.62, 0.97);
-    return { turbulenceFactor, pressureFactor, dampingBoost: 0, wakeSourceFactor: clamp(0.12 + 0.88 * turbulenceFactor, 0.66, 0.98) };
+    const spoilerTurbulenceFactor = clamp(1 - (1 - styleTarget.turbulence) * effectiveness, 0.65, 0.97);
+    const spoilerPressureFactor = clamp(1 - (1 - styleTarget.pressure) * effectiveness, 0.62, 0.97);
+    turbulenceFactor *= spoilerTurbulenceFactor;
+    pressureFactor *= spoilerPressureFactor;
+    wakeSourceFactor *= clamp(0.12 + 0.88 * spoilerTurbulenceFactor, 0.66, 0.98);
   }
-  if (config.mitigation === "dampers" && rowIsInRange(row, config.damperStartRow, config.damperEndRow, rowCount)) {
+  if (isMitigationActive(config, "dampers") && rowIsInRange(row, config.damperStartRow, config.damperEndRow, rowCount)) {
     const spacingFactor = clamp(2 / config.damperSpacingM, 0.5, 2.5);
-    return { turbulenceFactor: 1, pressureFactor: 1, dampingBoost: clamp(config.damperDampingPercent * spacingFactor, 0.5, 18), wakeSourceFactor: 1 };
+    dampingBoost += clamp(config.damperDampingPercent * spacingFactor, 0.5, 18);
   }
-  return { turbulenceFactor: 1, pressureFactor: 1, dampingBoost: 0, wakeSourceFactor: 1 };
+  return {
+    turbulenceFactor: clamp(turbulenceFactor, 0.45, 1),
+    pressureFactor: clamp(pressureFactor, 0.48, 1),
+    dampingBoost,
+    wakeSourceFactor: clamp(wakeSourceFactor, 0.5, 1),
+  };
 }
 
 export function getPanelCoordinates(row: number, module: number, geometry = DEFAULT_ARRAY_CONFIG) {
@@ -644,7 +662,7 @@ function combinedAttachedVibrationIndex(directIndex: number, supportIndex: numbe
 }
 
 function summarizeMitigationRows(
-  concept: Exclude<MitigationId, "none">,
+  concept: MitigationConceptId,
   elementLabel: string,
   loadBasis: string,
   elements: MitigationElementLoad[],
@@ -685,15 +703,15 @@ function summarizeMitigationRows(
   };
 }
 
-function simulateMitigationLoads(
+function simulateMitigationLoad(
   config: SimulationConfig,
+  concept: MitigationConceptId,
   rows: RowResult[],
   dynamicPressureKpa: number,
   speedMs: number,
   flow: FlowComponents,
   panelSheddingFrequencyHz: number,
-): MitigationLoadResult | null {
-  if (config.mitigation === "none") return null;
+): MitigationLoadResult {
   const geometry = config.geometry;
   const metrics = getArrayMetrics(geometry);
   const arrayBounds = getArrayBounds(geometry);
@@ -725,7 +743,7 @@ function simulateMitigationLoads(
     };
   };
 
-  if (config.mitigation === "screen") {
+  if (concept === "screen") {
     const porosityRatio = clamp(config.screenPorosity / 100, 0.2, 0.8);
     const solidity = 1 - porosityRatio;
     const dragCoefficient = 0.2 + 1.1 * Math.pow(solidity, 1.35);
@@ -776,7 +794,7 @@ function simulateMitigationLoads(
     );
   }
 
-  if (config.mitigation === "vanes") {
+  if (concept === "vanes") {
     const normalSpeed = speedMs * Math.abs(flow.x);
     const normalPressureFactor = 0.08 + 0.92 * flow.x * flow.x;
     for (let row = 1; row <= geometry.rows.length; row += 1) {
@@ -827,7 +845,7 @@ function simulateMitigationLoads(
     );
   }
 
-  if (config.mitigation === "spoilers") {
+  if (concept === "spoilers") {
     const styleSolidity = { perforated: 0.62, continuous: 1, tabs: 0.42 }[config.spoilerStyle];
     const dragCoefficient = 0.25 + 1.05 * Math.pow(styleSolidity, 0.8);
     const angleRad = config.spoilerAngleDeg * RAD;
@@ -918,6 +936,25 @@ function simulateMitigationLoads(
     "Panel uplift transfers through each damper tributary area. The vibration value uses the fitted panel response and excludes direct pad drag.",
     elements,
   );
+}
+
+function simulateMitigationLoads(
+  config: SimulationConfig,
+  rows: RowResult[],
+  dynamicPressureKpa: number,
+  speedMs: number,
+  flow: FlowComponents,
+  panelSheddingFrequencyHz: number,
+) {
+  return [...new Set(config.activeMitigations)].map((concept) => simulateMitigationLoad(
+    config,
+    concept,
+    rows,
+    dynamicPressureKpa,
+    speedMs,
+    flow,
+    panelSheddingFrequencyHz,
+  ));
 }
 
 export function simulate(config: SimulationConfig): SimulationResult {
@@ -1038,8 +1075,8 @@ export function simulate(config: SimulationConfig): SimulationResult {
   const vibration = rows.reduce((current, row) => Math.max(current, row.vibrationIndex), 0);
   const front = rows[0].peakUpliftKpa;
   const rear = rows[rows.length - 1].peakUpliftKpa;
-  const mitigationLoad = simulateMitigationLoads(config, rows, dynamicPressureKpa, speedMs, flow, sheddingFrequencyHz);
-  return { dynamicPressureKpa, sheddingFrequencyHz, peakUpliftKpa: peak.peakUpliftKpa, peakRow: peak.row, peakColumn: peak.column, peakModule: peak.module, vibrationIndex: vibration, frontRearRatio: rear > 0 ? front / rear : 1, alignmentPercent, rows, mitigationLoad };
+  const mitigationLoads = simulateMitigationLoads(config, rows, dynamicPressureKpa, speedMs, flow, sheddingFrequencyHz);
+  return { dynamicPressureKpa, sheddingFrequencyHz, peakUpliftKpa: peak.peakUpliftKpa, peakRow: peak.row, peakColumn: peak.column, peakModule: peak.module, vibrationIndex: vibration, frontRearRatio: rear > 0 ? front / rear : 1, alignmentPercent, rows, mitigationLoads };
 }
 
 type ColorStop = { at: number; color: readonly [number, number, number] };

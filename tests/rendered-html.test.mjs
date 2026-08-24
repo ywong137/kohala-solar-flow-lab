@@ -36,6 +36,8 @@ test("server-renders the completed wind lab", async () => {
   assert.match(html, /aria-pressed="true"/);
   assert.match(html, /class="slider-marker-tick"/);
   assert.match(html, /Show color-coding on mitigation elements/);
+  assert.match(html, /aria-label="Active mitigation concepts"/);
+  assert.match(html, /OFF · Rows 7–7/);
   assert.doesNotMatch(html, /Immediate damage/i);
 });
 

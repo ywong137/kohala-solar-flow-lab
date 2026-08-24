@@ -49,14 +49,17 @@ import {
   riskColor,
   simulate,
   type MitigationId,
+  type MitigationConceptId,
   type MitigationLoadResult,
   type ScenarioId,
   type SimulationConfig,
+  type SimulationResult,
   type SpoilerStyle,
   type ViewMode,
 } from "../lib/physics";
 
 const mitigationOrder: MitigationId[] = ["none", "screen", "vanes", "spoilers", "dampers"];
+const mitigationConceptOrder: MitigationConceptId[] = ["screen", "vanes", "spoilers", "dampers"];
 
 const mitigationIcons: Record<MitigationId, typeof Shield> = {
   none: Grid3X3,
@@ -74,7 +77,7 @@ export function WindLab() {
   const [ambientTurbulence, setAmbientTurbulence] = useState<number>(SCENARIOS.storm.ambientTurbulence);
   const [panelFrequencyHz, setPanelFrequencyHz] = useState(DEFAULT_ARRAY_CONFIG.naturalFrequencyHz);
   const [dampingPercent, setDampingPercent] = useState(DEFAULT_ARRAY_CONFIG.structuralDampingPercent);
-  const [mitigation, setMitigation] = useState<MitigationId>("none");
+  const [activeMitigations, setActiveMitigations] = useState<MitigationConceptId[]>([]);
   const [screenPorosity, setScreenPorosity] = useState(40);
   const [screenHeightM, setScreenHeightM] = useState(2.2);
   const [screenStartRow, setScreenStartRow] = useState(7);
@@ -132,7 +135,7 @@ export function WindLab() {
       ambientTurbulence,
       panelFrequencyHz,
       dampingPercent,
-      mitigation,
+      activeMitigations,
       screenPorosity,
       screenHeightM,
       screenStartRow,
@@ -157,7 +160,7 @@ export function WindLab() {
       ambientTurbulence,
       panelFrequencyHz,
       dampingPercent,
-      mitigation,
+      activeMitigations,
       screenPorosity,
       screenHeightM,
       screenStartRow,
@@ -179,11 +182,26 @@ export function WindLab() {
   const result = useMemo(() => simulate(config), [config]);
   const selectedResult = getPanelResult(result, selectedPanel.row, selectedPanel.module);
   const selectedVisualMotion = getPanelVisualMotion(selectedResult.vibrationIndex, geometry);
-  const baselineResult = useMemo(() => simulate({ ...config, mitigation: "none" }), [config]);
+  const peakMitigationPressureKpa = result.mitigationLoads.length > 0
+    ? Math.max(...result.mitigationLoads.map((load) => load.peakPressureKpa))
+    : 0;
+  const peakMitigationVibration = result.mitigationLoads.length > 0
+    ? Math.max(...result.mitigationLoads.map((load) => load.peakVibrationIndex))
+    : 0;
+  const baselineResult = useMemo(() => simulate({ ...config, activeMitigations: [] }), [config]);
   const comparisons = useMemo(
-    () => mitigationOrder.map((id) => ({ id, result: simulate({ ...config, mitigation: id }) })),
+    () => mitigationOrder.map((id) => ({
+      id,
+      result: simulate({ ...config, activeMitigations: id === "none" ? [] : [id] }),
+    })),
     [config],
   );
+
+  const toggleMitigation = (concept: MitigationConceptId) => {
+    setActiveMitigations((current) => current.includes(concept)
+      ? current.filter((item) => item !== concept)
+      : mitigationConceptOrder.filter((item) => current.includes(item) || item === concept));
+  };
 
   const applyScenario = (id: ScenarioId) => {
     const next = SCENARIOS[id];
@@ -202,7 +220,7 @@ export function WindLab() {
     applyScenario("storm");
     setPanelFrequencyHz(geometry.naturalFrequencyHz);
     setDampingPercent(geometry.structuralDampingPercent);
-    setMitigation("none");
+    setActiveMitigations([]);
     setScreenPorosity(40);
     setScreenHeightM(2.2);
     setScreenStartRow(rowCount);
@@ -338,25 +356,25 @@ export function WindLab() {
             onSelectPanel={setSelectedPanel}
           />
 
-          {mitigation !== "none" ? (
+          {activeMitigations.length > 0 ? (
             <div
               className="mitigation-visual-key"
               style={{ "--concept-accent": MITIGATION_BASE_COLOR } as React.CSSProperties}
             >
               <i />
               <span>
-                <strong>{MITIGATIONS[mitigation].label}</strong>
-                {colorCodeMitigations && viewMode === "pressure" && result.mitigationLoad
-                  ? `Element colors · ${result.mitigationLoad.peakPressureKpa.toFixed(2)} kPa device peak`
-                  : colorCodeMitigations && viewMode === "vibration" && result.mitigationLoad
-                    ? `Element colors + motion · ${result.mitigationLoad.peakVibrationIndex.toFixed(0)} / 100 device peak`
+                <strong>{activeMitigations.length === 1 ? MITIGATIONS[activeMitigations[0]].label : `${activeMitigations.length} active mitigations`}</strong>
+                {colorCodeMitigations && viewMode === "pressure"
+                  ? `Element colors · ${peakMitigationPressureKpa.toFixed(2)} kPa highest device peak`
+                  : colorCodeMitigations && viewMode === "vibration"
+                    ? `Element colors + motion · ${peakMitigationVibration.toFixed(0)} / 100 highest device peak`
                     : "Bright magenta geometry in the model"}
               </span>
             </div>
           ) : null}
 
           {viewMode === "pressure" ? (
-            <div className={`pressure-visual-key ${mitigation !== "none" ? "with-mitigation" : ""}`}>
+            <div className={`pressure-visual-key ${activeMitigations.length > 0 ? "with-mitigation" : ""}`}>
               <div className="pressure-key-heading">
                 <strong>Peak uplift · absolute scale</strong>
                 <span>{pressureDemandLabel(result.peakUpliftKpa)} demand</span>
@@ -500,32 +518,40 @@ export function WindLab() {
             </div>
             <Shield size={17} />
           </div>
-          <div className="mitigation-grid">
+          <div className="mitigation-grid" role="group" aria-label="Active mitigation concepts">
             {mitigationOrder.map((id) => {
               const item = MITIGATIONS[id];
               const Icon = mitigationIcons[id];
+              const active = id === "none"
+                ? activeMitigations.length === 0
+                : activeMitigations.includes(id);
               return (
                 <button
-                  className={mitigation === id ? "active" : ""}
+                  className={active ? "active" : ""}
                   key={id}
-                  onClick={() => setMitigation(id)}
+                  onClick={() => id === "none" ? setActiveMitigations([]) : toggleMitigation(id)}
                   style={{ "--concept-accent": item.color } as React.CSSProperties}
+                  aria-pressed={active}
                 >
                   <Icon size={17} />
                   <span>{item.label}</span>
-                  <small>{item.short}</small>
+                  <small>{id === "none" ? item.short : `${active ? "ON" : "OFF"} · ${item.short}`}</small>
                 </button>
               );
             })}
           </div>
-          <p className="concept-note">{MITIGATIONS[mitigation].detail}</p>
+          <p className="concept-note">
+            {activeMitigations.length === 0
+              ? MITIGATIONS.none.detail
+              : `${activeMitigations.map((id) => MITIGATIONS[id].label).join(" + ")} operate together. Their modeled effects combine by panel and row.`}
+          </p>
 
-          <label className={`mitigation-color-toggle ${mitigation === "none" ? "disabled" : ""}`}>
+          <label className={`mitigation-color-toggle ${activeMitigations.length === 0 ? "disabled" : ""}`}>
             <span>
               <strong>Show color-coding on mitigation elements</strong>
               <small>
-                {mitigation === "none"
-                  ? "Select a mitigation concept to view its element loads."
+                {activeMitigations.length === 0
+                  ? "Switch on a mitigation concept to view its element loads."
                   : viewMode === "flow"
                     ? "Pressure and vibration views use the panel heatmap scale."
                     : `Each physical element shows its own ${viewMode} demand.`}
@@ -534,19 +560,20 @@ export function WindLab() {
             <input
               type="checkbox"
               checked={colorCodeMitigations}
-              disabled={mitigation === "none"}
+              disabled={activeMitigations.length === 0}
               onChange={(event) => setColorCodeMitigations(event.target.checked)}
               aria-label="Show color-coding on mitigation elements"
             />
           </label>
 
-          {mitigation !== "none" ? (
+          {activeMitigations.map((mitigation) => (
             <div
+              key={mitigation}
               className="mitigation-tuning"
               style={{ "--concept-accent": MITIGATIONS[mitigation].color } as React.CSSProperties}
             >
               <div className="tuning-heading">
-                <span><i /> Visible concept controls</span>
+                <span><i /> {MITIGATIONS[mitigation].label} controls</span>
                 <small>magenta model</small>
               </div>
 
@@ -724,20 +751,20 @@ export function WindLab() {
                 </>
               ) : null}
             </div>
-          ) : null}
+          ))}
 
-          {result.mitigationLoad ? (
+          {result.mitigationLoads.map((load) => (
             <DeviceLoadPanel
-              key={result.mitigationLoad.concept}
-              load={result.mitigationLoad}
-              color={MITIGATIONS[mitigation].color}
+              key={load.concept}
+              load={load}
+              color={MITIGATIONS[load.concept].color}
             />
-          ) : null}
+          ))}
 
           <button className="compare-button" onClick={() => setShowComparison(true)}>
             <BarChart3 size={16} />
             Compare concepts against baseline
-            <span>5</span>
+            <span>{5 + (activeMitigations.length > 1 ? 1 : 0)}</span>
           </button>
 
           <details className="advanced-controls">
@@ -818,7 +845,7 @@ export function WindLab() {
               <div>
                 <span className="eyebrow">SCENARIO COMPARISON · {windSpeedMph} MPH FROM {cardinalDirection(windBearing)}</span>
                 <h2>Each concept versus one baseline</h2>
-                <p>Baseline means this saved geometry and current wind, with all mitigation removed. Each row changes only the named concept.</p>
+                <p>Baseline removes all mitigation. Each concept row activates one concept alone. The current-combination row shows all selected concepts together.</p>
               </div>
               <button className="icon-button" onClick={() => setShowComparison(false)} aria-label="Close comparison"><X size={18} /></button>
             </div>
@@ -832,8 +859,12 @@ export function WindLab() {
               {comparisons.map(({ id, result: item }) => {
                 const pressureDelta = 100 * (item.peakUpliftKpa / Math.max(baselineResult.peakUpliftKpa, 0.01) - 1);
                 const vibrationDelta = 100 * (item.vibrationIndex / Math.max(baselineResult.vibrationIndex, 0.01) - 1);
+                const itemLoad = item.mitigationLoads[0];
+                const active = id === "none"
+                  ? activeMitigations.length === 0
+                  : activeMitigations.length === 1 && activeMitigations[0] === id;
                 return (
-                  <article key={id} className={mitigation === id ? "active" : ""}>
+                  <article key={id} className={active ? "active" : ""}>
                     <span className="comparison-name">
                       {MITIGATIONS[id].label}
                       <small>{getMitigationSummary(id, config)}</small>
@@ -842,13 +873,20 @@ export function WindLab() {
                     <span className="comparison-value"><strong>{item.vibrationIndex.toFixed(0)} / 100</strong><small>{id === "none" ? "Baseline" : formatDelta(vibrationDelta)}</small></span>
                     <span className="comparison-value"><strong>Row {item.peakRow} · Col {item.peakColumn}</strong><small>highest uplift panel</small></span>
                     <span className="comparison-value">
-                      <strong>{item.mitigationLoad ? `${item.mitigationLoad.peakAttachmentLoadKn.toFixed(2)} kN` : "—"}</strong>
-                      <small>{item.mitigationLoad ? `Row ${item.mitigationLoad.peakRow} · ${item.mitigationLoad.peakVibrationIndex.toFixed(0)} / 100 vibration` : "No added hardware"}</small>
+                      <strong>{itemLoad ? `${itemLoad.peakAttachmentLoadKn.toFixed(2)} kN` : "—"}</strong>
+                      <small>{itemLoad ? `Row ${itemLoad.peakRow} · ${itemLoad.peakVibrationIndex.toFixed(0)} / 100 vibration` : "No added hardware"}</small>
                     </span>
-                    <button type="button" onClick={() => { setMitigation(id); setShowComparison(false); }}>{mitigation === id ? "Active" : "Use concept"}</button>
+                    <button type="button" onClick={() => { setActiveMitigations(id === "none" ? [] : [id]); setShowComparison(false); }}>{active ? "Active" : id === "none" ? "Use baseline" : "Use alone"}</button>
                   </article>
                 );
               })}
+              {activeMitigations.length > 1 ? (
+                <ComparisonCombinationRow
+                  result={result}
+                  baseline={baselineResult}
+                  activeMitigations={activeMitigations}
+                />
+              ) : null}
             </div>
             <div className="comparison-candidates">
               <strong>Other candidates to evaluate</strong>
@@ -911,6 +949,7 @@ export function WindLab() {
               <article><span>10</span><h3>Device assumptions</h3><p>Loads use the <a href="https://www1.grc.nasa.gov/beginners-guide-to-aeronautics/drag-equation/" target="_blank" rel="noreferrer">NASA drag equation</a>, projected wind angle, local turbulence, and assumed device modes. Screen porosity follows the measured trend in the <a href="https://www.ars.usda.gov/ARSUserFiles/30200525/1095%20Windbreak%20drag%20as%20influenced%20by%20porosity.pdf" target="_blank" rel="noreferrer">USDA windbreak study</a>.</p></article>
               <article><span>11</span><h3>Terrain and wall flow</h3><p>The flow follows the rendered ground and clears the wall. Speed loss and turbulence depend on wall height, distance, and wind angle. The approximation follows <a href="https://wasp.dtu.dk/software/wasp-cfd/flow-model" target="_blank" rel="noreferrer">DTU terrain-flow methods</a> and <a href="https://publications.anl.gov/anlpubs/2021/05/167360.pdf" target="_blank" rel="noreferrer">Argonne wall-wake scaling</a>.</p></article>
               <article><span>12</span><h3>Absolute pressure colors</h3><p>Pressure colors use absolute peak uplift, not each scenario’s maximum. Blue is low demand. Green is moderate. Yellow is elevated. Orange is high. Red is severe. The scale uses 2.4 kPa as a provisional module reference from a similar <a href="https://jinkosolar.com.au/wp-content/uploads/2022/04/EaglePerc-JKM390-410M-72H-A1.1-EN.pdf" target="_blank" rel="noreferrer">Jinko Eagle PERC datasheet</a>. It does not establish rack, clamp, anchor, or fatigue capacity.</p></article>
+              <article><span>13</span><h3>Combined mitigations</h3><p>Active screens, vanes, and deflectors multiply their local flow factors. Dampers add local structural damping. Each hardware model then uses the combined panel response. These interaction estimates still require CFD and physical validation.</p></article>
               <article><span>06</span><h3>Recorded wind</h3><p>The sound control uses the CC0 “Steady wind” recording from the USC/Sunset sound-effects collection. Speed controls its gain and playback rate.</p></article>
             </div>
             <div className="modal-caution"><Info size={16} /> Do not use these values for final structural design or manufacturer compliance.</div>
@@ -973,6 +1012,38 @@ function DeviceLoadPanel({ load, color }: { load: MitigationLoadResult; color: s
         </div>
       </div>
     </section>
+  );
+}
+
+function ComparisonCombinationRow({
+  result,
+  baseline,
+  activeMitigations,
+}: {
+  result: SimulationResult;
+  baseline: SimulationResult;
+  activeMitigations: MitigationConceptId[];
+}) {
+  const pressureDelta = 100 * (result.peakUpliftKpa / Math.max(baseline.peakUpliftKpa, 0.01) - 1);
+  const vibrationDelta = 100 * (result.vibrationIndex / Math.max(baseline.vibrationIndex, 0.01) - 1);
+  const peakLoad = result.mitigationLoads.reduce((current, load) =>
+    load.peakAttachmentLoadKn > current.peakAttachmentLoadKn ? load : current,
+  );
+  return (
+    <article className="active combination-row">
+      <span className="comparison-name">
+        Current combination
+        <small>{activeMitigations.map((id) => MITIGATIONS[id].label).join(" + ")}</small>
+      </span>
+      <span className="comparison-value"><strong>{result.peakUpliftKpa.toFixed(2)} kPa</strong><small>{formatDelta(pressureDelta)}</small></span>
+      <span className="comparison-value"><strong>{result.vibrationIndex.toFixed(0)} / 100</strong><small>{formatDelta(vibrationDelta)}</small></span>
+      <span className="comparison-value"><strong>Row {result.peakRow} · Col {result.peakColumn}</strong><small>highest uplift panel</small></span>
+      <span className="comparison-value">
+        <strong>{peakLoad.peakAttachmentLoadKn.toFixed(2)} kN</strong>
+        <small>{MITIGATIONS[peakLoad.concept].label} · Row {peakLoad.peakRow}</small>
+      </span>
+      <button type="button" disabled>Active</button>
+    </article>
   );
 }
 

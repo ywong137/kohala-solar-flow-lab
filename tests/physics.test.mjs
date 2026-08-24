@@ -28,7 +28,7 @@ const baseConfig = {
   ...SCENARIOS.storm,
   panelFrequencyHz: DEFAULT_ARRAY_CONFIG.naturalFrequencyHz,
   dampingPercent: DEFAULT_ARRAY_CONFIG.structuralDampingPercent,
-  mitigation: "none",
+  activeMitigations: [],
   screenPorosity: 40,
   screenHeightM: 2.2,
   screenStartRow: 7,
@@ -143,14 +143,14 @@ test("resolves every physical panel and column", () => {
 test("applies damper damping only to fitted rows", () => {
   const light = simulate({
     ...baseConfig,
-    mitigation: "dampers",
+    activeMitigations: ["dampers"],
     damperStartRow: 1,
     damperEndRow: 1,
     damperDampingPercent: 1,
   });
   const heavy = simulate({
     ...baseConfig,
-    mitigation: "dampers",
+    activeMitigations: ["dampers"],
     damperStartRow: 1,
     damperEndRow: 1,
     damperDampingPercent: 10,
@@ -165,9 +165,9 @@ test("applies damper damping only to fitted rows", () => {
 
 test("uses inclusive placement ranges for every fitted concept", () => {
   const baseline = simulate(baseConfig);
-  const vanes = simulate({ ...baseConfig, mitigation: "vanes", vaneStartRow: 3, vaneEndRow: 4 });
-  const spoilers = simulate({ ...baseConfig, mitigation: "spoilers", spoilerStartRow: 3, spoilerEndRow: 4 });
-  const dampers = simulate({ ...baseConfig, mitigation: "dampers", damperStartRow: 3, damperEndRow: 4, damperDampingPercent: 10 });
+  const vanes = simulate({ ...baseConfig, activeMitigations: ["vanes"], vaneStartRow: 3, vaneEndRow: 4 });
+  const spoilers = simulate({ ...baseConfig, activeMitigations: ["spoilers"], spoilerStartRow: 3, spoilerEndRow: 4 });
+  const dampers = simulate({ ...baseConfig, activeMitigations: ["dampers"], damperStartRow: 3, damperEndRow: 4, damperDampingPercent: 10 });
 
   // Flow devices can change rows downwind through their altered wakes. The rear upwind row stays unchanged.
   assert.equal(vanes.rows[6].peakUpliftKpa, baseline.rows[6].peakUpliftKpa);
@@ -182,12 +182,33 @@ test("uses inclusive placement ranges for every fitted concept", () => {
 test("keeps local flow devices on their fitted rows", () => {
   const baseline = simulate(baseConfig);
   for (const mitigation of ["vanes", "spoilers"]) {
-    const fitted = simulate({ ...baseConfig, mitigation });
+    const fitted = simulate({ ...baseConfig, activeMitigations: [mitigation] });
     assert.ok(fitted.rows[0].peakUpliftKpa < baseline.rows[0].peakUpliftKpa);
     for (let rowIndex = 1; rowIndex < fitted.rows.length; rowIndex += 1) {
       assert.equal(fitted.rows[rowIndex].peakUpliftKpa, baseline.rows[rowIndex].peakUpliftKpa);
     }
   }
+});
+
+test("combines every active mitigation and reports each hardware load", () => {
+  const baseline = simulate(baseConfig);
+  const screenOnly = simulate({ ...baseConfig, activeMitigations: ["screen"] });
+  const allActive = simulate({
+    ...baseConfig,
+    activeMitigations: ["screen", "vanes", "spoilers", "dampers"],
+    vaneEndRow: 3,
+    spoilerEndRow: 2,
+    damperEndRow: 2,
+  });
+
+  assert.deepEqual(
+    allActive.mitigationLoads.map((load) => load.concept),
+    ["screen", "vanes", "spoilers", "dampers"],
+  );
+  assert.deepEqual(baseline.mitigationLoads, []);
+  assert.ok(allActive.peakUpliftKpa < screenOnly.peakUpliftKpa);
+  assert.ok(allActive.vibrationIndex < 100);
+  assert.ok(allActive.mitigationLoads.every((load) => load.elementCount > 0));
 });
 
 test("makes every screen span the full array envelope", () => {
@@ -220,13 +241,13 @@ test("resolves a saved custom row layout", () => {
 test("places screens behind an inclusive row range", () => {
   const rearOnly = simulate({
     ...baseConfig,
-    mitigation: "screen",
+    activeMitigations: ["screen"],
     screenStartRow: 7,
     screenEndRow: 7,
   });
   const rearTwo = simulate({
     ...baseConfig,
-    mitigation: "screen",
+    activeMitigations: ["screen"],
     screenStartRow: 6,
     screenEndRow: 7,
   });
@@ -240,7 +261,7 @@ test("does not apply a rear screen to an upwind makai array", () => {
   const makaiScreen = simulate({
     ...baseConfig,
     ...SCENARIOS.makai,
-    mitigation: "screen",
+    activeMitigations: ["screen"],
     screenStartRow: 7,
     screenEndRow: 7,
   });
@@ -252,50 +273,52 @@ test("does not apply a rear screen to an upwind makai array", () => {
 test("resolves wind-screen demand by bay and fitted row", () => {
   const openScreen = simulate({
     ...baseConfig,
-    mitigation: "screen",
+    activeMitigations: ["screen"],
     screenPorosity: 80,
     screenStartRow: 6,
     screenEndRow: 7,
   });
   const solidScreen = simulate({
     ...baseConfig,
-    mitigation: "screen",
+    activeMitigations: ["screen"],
     screenPorosity: 20,
     screenStartRow: 6,
     screenEndRow: 7,
   });
 
-  assert.equal(openScreen.mitigationLoad.concept, "screen");
-  assert.deepEqual(openScreen.mitigationLoad.rows.map((row) => row.row), [6, 7]);
-  assert.ok(openScreen.mitigationLoad.rows.every((row) => row.elementCount > 1));
-  assert.ok(solidScreen.mitigationLoad.peakPressureKpa > openScreen.mitigationLoad.peakPressureKpa);
-  assert.ok(solidScreen.mitigationLoad.peakAttachmentLoadKn > 0);
-  assert.ok(solidScreen.mitigationLoad.peakOverturningMomentKnM > 0);
+  const openScreenLoad = openScreen.mitigationLoads[0];
+  const solidScreenLoad = solidScreen.mitigationLoads[0];
+  assert.equal(openScreenLoad.concept, "screen");
+  assert.deepEqual(openScreenLoad.rows.map((row) => row.row), [6, 7]);
+  assert.ok(openScreenLoad.rows.every((row) => row.elementCount > 1));
+  assert.ok(solidScreenLoad.peakPressureKpa > openScreenLoad.peakPressureKpa);
+  assert.ok(solidScreenLoad.peakAttachmentLoadKn > 0);
+  assert.ok(solidScreenLoad.peakOverturningMomentKnM > 0);
 });
 
 test("scales added-hardware demand with wind speed and direction", () => {
-  const slow = simulate({ ...baseConfig, mitigation: "spoilers", windSpeedMph: 45 });
-  const fast = simulate({ ...baseConfig, mitigation: "spoilers", windSpeedMph: 90 });
-  const alongRows = simulate({ ...baseConfig, mitigation: "spoilers", windBearing: 130 });
+  const slow = simulate({ ...baseConfig, activeMitigations: ["spoilers"], windSpeedMph: 45 });
+  const fast = simulate({ ...baseConfig, activeMitigations: ["spoilers"], windSpeedMph: 90 });
+  const alongRows = simulate({ ...baseConfig, activeMitigations: ["spoilers"], windBearing: 130 });
 
-  assert.ok(fast.mitigationLoad.peakPressureKpa > slow.mitigationLoad.peakPressureKpa * 3.5);
-  assert.ok(fast.mitigationLoad.peakAttachmentLoadKn > slow.mitigationLoad.peakAttachmentLoadKn * 3.5);
-  assert.ok(alongRows.mitigationLoad.peakPressureKpa < fast.mitigationLoad.peakPressureKpa);
-  assert.equal(fast.mitigationLoad.rows[0].elementCount, baseConfig.geometry.rows[0].columns);
+  assert.ok(fast.mitigationLoads[0].peakPressureKpa > slow.mitigationLoads[0].peakPressureKpa * 3.5);
+  assert.ok(fast.mitigationLoads[0].peakAttachmentLoadKn > slow.mitigationLoads[0].peakAttachmentLoadKn * 3.5);
+  assert.ok(alongRows.mitigationLoads[0].peakPressureKpa < fast.mitigationLoads[0].peakPressureKpa);
+  assert.equal(fast.mitigationLoads[0].rows[0].elementCount, baseConfig.geometry.rows[0].columns);
 });
 
 test("includes local rack motion in attached mitigation vibration", () => {
   for (const mitigation of ["vanes", "spoilers"]) {
     const result = simulate({
       ...baseConfig,
-      mitigation,
+      activeMitigations: [mitigation],
       vaneStartRow: 2,
       vaneEndRow: 2,
       spoilerStartRow: 2,
       spoilerEndRow: 2,
     });
     const rowPanels = result.rows[1].panels;
-    const deviceRow = result.mitigationLoad.rows[0];
+    const deviceRow = result.mitigationLoads[0].rows[0];
     const panelPeak = Math.max(...rowPanels.map((panel) => panel.vibrationIndex));
     const panelMinimum = Math.min(...rowPanels.map((panel) => panel.vibrationIndex));
     const devicePeak = Math.max(...deviceRow.elements.map((element) => element.vibrationIndex));
@@ -310,21 +333,21 @@ test("includes local rack motion in attached mitigation vibration", () => {
 test("resolves transferred cyclic demand at every fitted damper", () => {
   const dense = simulate({
     ...baseConfig,
-    mitigation: "dampers",
+    activeMitigations: ["dampers"],
     damperSpacingM: 0.8,
     damperStartRow: 2,
     damperEndRow: 3,
   });
   const sparse = simulate({
     ...baseConfig,
-    mitigation: "dampers",
+    activeMitigations: ["dampers"],
     damperSpacingM: 4,
     damperStartRow: 2,
     damperEndRow: 3,
   });
 
-  assert.deepEqual(dense.mitigationLoad.rows.map((row) => row.row), [2, 3]);
-  assert.ok(dense.mitigationLoad.elementCount > sparse.mitigationLoad.elementCount);
-  assert.ok(dense.mitigationLoad.peakAttachmentLoadKn < sparse.mitigationLoad.peakAttachmentLoadKn);
-  assert.equal(dense.mitigationLoad.peakOverturningMomentKnM, 0);
+  assert.deepEqual(dense.mitigationLoads[0].rows.map((row) => row.row), [2, 3]);
+  assert.ok(dense.mitigationLoads[0].elementCount > sparse.mitigationLoads[0].elementCount);
+  assert.ok(dense.mitigationLoads[0].peakAttachmentLoadKn < sparse.mitigationLoads[0].peakAttachmentLoadKn);
+  assert.equal(dense.mitigationLoads[0].peakOverturningMomentKnM, 0);
 });

@@ -11,6 +11,7 @@ import {
   getArrayBounds,
   getFlowComponents,
   getInstalledScreenRows,
+  isMitigationActive,
   getPanelResult,
   pressureColor,
   riskColor,
@@ -27,7 +28,7 @@ import {
   getSiteTerrainHeight,
   getSiteTerrainLayout,
   resolveSiteFlowBoundary,
-  type MitigationId,
+  type MitigationConceptId,
   type SimulationConfig,
   type SimulationResult,
   type ViewMode,
@@ -759,11 +760,36 @@ export function WindScene({
     selectionMarker.visible = false;
     scene.add(selectionMarker);
 
-    const directionMaterial = new THREE.MeshStandardMaterial({ color: 0x8bf2c9, emissive: 0x245e4b, emissiveIntensity: 1.1 });
-    const maukaArrow = new THREE.ArrowHelper(new THREE.Vector3(0, 0, 1), new THREE.Vector3(14, 0.15, -22), 8, 0x7ff1c4, 1.2, 0.7);
+    const windMarkerHeight = Math.max(8, wallTopHeightAt(0) + 4.5);
+    const windMarkerLength = Math.min(16, Math.max(11, arrayBounds.width * 0.24));
+    const directionMaterial = new THREE.MeshBasicMaterial({
+      color: 0x7ff1c4,
+      transparent: true,
+      opacity: 0.72,
+      depthTest: false,
+      fog: false,
+    });
+    const maukaArrow = new THREE.ArrowHelper(
+      new THREE.Vector3(0, 0, 1),
+      new THREE.Vector3(arrayCenterX, windMarkerHeight, 0),
+      windMarkerLength,
+      0x7ff1c4,
+      1.8,
+      1.05,
+    );
+    (maukaArrow.line.material as THREE.LineBasicMaterial).depthTest = false;
+    (maukaArrow.line.material as THREE.LineBasicMaterial).transparent = true;
+    (maukaArrow.line.material as THREE.LineBasicMaterial).opacity = 0.98;
+    (maukaArrow.line.material as THREE.LineBasicMaterial).fog = false;
+    (maukaArrow.cone.material as THREE.MeshBasicMaterial).depthTest = false;
+    (maukaArrow.cone.material as THREE.MeshBasicMaterial).fog = false;
+    maukaArrow.line.renderOrder = 50;
+    maukaArrow.cone.renderOrder = 50;
     scene.add(maukaArrow);
-    const bearingDisc = new THREE.Mesh(new THREE.CylinderGeometry(0.9, 0.9, 0.08, 32), directionMaterial);
-    bearingDisc.position.set(14, 0.07, -22);
+    const bearingDisc = new THREE.Mesh(new THREE.RingGeometry(0.72, 1.08, 32), directionMaterial);
+    bearingDisc.rotation.x = -Math.PI / 2;
+    bearingDisc.position.set(arrayCenterX, windMarkerHeight, 0);
+    bearingDisc.renderOrder = 49;
     scene.add(bearingDisc);
 
     const mitigationGroups: Record<string, THREE.Group> = {};
@@ -796,7 +822,7 @@ export function WindScene({
       emissive: mitigationBaseEmissive,
       emissiveIntensity: 2.4,
     });
-    type DeviceConcept = Exclude<MitigationId, "none">;
+    type DeviceConcept = MitigationConceptId;
     const deviceMaterialVisuals: Array<{
       concept: DeviceConcept;
       row: number;
@@ -1156,7 +1182,7 @@ export function WindScene({
             speedFactor *= 1 + contraction * crossRowAlignment * (flowSign > 0 ? 0.2 : 0.08);
             verticalVelocity += followsSlope * (flowSign > 0 ? 0.76 : 0.46);
             turbulence += rowTurbulence * crossRowAlignment * (flowSign > 0 ? 0.08 : 0.14);
-            if (live.config.mitigation === "vanes" && rowIsInRange(row.row, live.config.vaneStartRow, live.config.vaneEndRow, rowCount)) {
+            if (isMitigationActive(live.config, "vanes") && rowIsInRange(row.row, live.config.vaneStartRow, live.config.vaneEndRow, rowCount)) {
               turbulence *= 0.76;
               lateralVelocity *= 0.62;
             }
@@ -1180,7 +1206,7 @@ export function WindScene({
           lateralVelocity += Math.sin(vortexPhase) * visualSpeed * rowTurbulence * wakeStrength * 0.16;
           verticalVelocity += Math.cos(vortexPhase * 0.83) * visualSpeed * rowTurbulence * wakeStrength * 0.12;
 
-          if (live.config.mitigation === "spoilers" && rowIsInRange(row.row, live.config.spoilerStartRow, live.config.spoilerEndRow, rowCount)) {
+          if (isMitigationActive(live.config, "spoilers") && rowIsInRange(row.row, live.config.spoilerStartRow, live.config.spoilerEndRow, rowCount)) {
             turbulence *= 0.82;
             verticalVelocity += visualSpeed * wakeStrength * 0.035;
           }
@@ -1226,7 +1252,7 @@ export function WindScene({
         live.config.panelFrequencyHz,
         live.config.dampingPercent,
         live.arrayState,
-        live.config.mitigation,
+        live.config.activeMitigations.join(","),
         live.config.screenPorosity,
         live.config.screenHeightM,
         live.config.screenStartRow,
@@ -1339,24 +1365,21 @@ export function WindScene({
           glow.intensity = 1.1 + live.config.damperDampingPercent * 0.15;
         });
 
-        const activeDeviceLoad = live.result.mitigationLoad;
         const activeElements = new Map(
-          activeDeviceLoad?.rows.flatMap((row) =>
-            row.elements.map((element) => [`${row.row}:${element.element}`, element] as const),
-          ) ?? [],
+          live.result.mitigationLoads.flatMap((load) => load.rows.flatMap((row) =>
+            row.elements.map((element) => [`${load.concept}:${row.row}:${element.element}`, element] as const),
+          )),
         );
         const loadColoringActive = live.colorCodeMitigations
           && (live.viewMode === "pressure" || live.viewMode === "vibration")
-          && activeDeviceLoad !== null;
+          && live.result.mitigationLoads.length > 0;
         const applyDeviceColor = (
           concept: DeviceConcept,
           row: number,
           element: number,
           material: THREE.MeshStandardMaterial,
         ) => {
-          const elementLoad = activeDeviceLoad?.concept === concept
-            ? activeElements.get(`${row}:${element}`)
-            : undefined;
+          const elementLoad = activeElements.get(`${concept}:${row}:${element}`);
           if (!loadColoringActive || !elementLoad) {
             material.color.copy(mitigationBaseColor);
             material.emissive.copy(mitigationBaseEmissive);
@@ -1387,7 +1410,7 @@ export function WindScene({
         }
 
         Object.entries(mitigationGroups).forEach(([id, group]) => {
-          group.visible = live.config.mitigation === id;
+          group.visible = isMitigationActive(live.config, id as MitigationConceptId);
         });
         lastVisualKey = visualKey;
       }
@@ -1542,34 +1565,34 @@ export function WindScene({
 
       const vibrationScale = live.viewMode === "vibration" && live.playing ? 1 : 0;
       const deviceLoadElements = new Map(
-        live.result.mitigationLoad?.rows.flatMap((row) =>
-          row.elements.map((element) => [`${row.row}:${element.element}`, element] as const),
-        ) ?? [],
+        live.result.mitigationLoads.flatMap((load) => load.rows.flatMap((row) =>
+          row.elements.map((element) => [`${load.concept}:${row.row}:${element.element}`, element] as const),
+        )),
       );
-      const elementVibration = (row: number, element: number) =>
-        deviceLoadElements.get(`${row}:${element}`)?.vibrationIndex ?? 0;
+      const elementVibration = (concept: MitigationConceptId, row: number, element: number) =>
+        deviceLoadElements.get(`${concept}:${row}:${element}`)?.vibrationIndex ?? 0;
       for (const screen of screenAssemblies) {
         const screenZ = getScreenGeometry(screen.row, geometry).z;
         screen.slats.forEach((slat, index) => {
-          const amplitude = vibrationScale * elementVibration(screen.row, slat.userData.segment + 1) * 0.00055;
+          const amplitude = vibrationScale * elementVibration("screen", screen.row, slat.userData.segment + 1) * 0.00055;
           const phase = screen.row * 0.71 + index * 0.33;
           slat.position.z = screenZ + Math.sin(elapsed * 7.4 + phase) * amplitude;
           slat.rotation.y = Math.cos(elapsed * 6.8 + phase) * amplitude * 0.08;
         });
         screen.posts.forEach((post, index) => {
-          const amplitude = vibrationScale * elementVibration(screen.row, post.userData.element) * 0.00055;
+          const amplitude = vibrationScale * elementVibration("screen", screen.row, post.userData.element) * 0.00055;
           post.rotation.x = Math.sin(elapsed * 6.3 + screen.row + index * 0.21) * amplitude * 0.04;
         });
       }
       for (const vane of vaneVisuals) {
         const amplitude = vibrationScale
-          * elementVibration(vane.userData.row, vane.userData.element)
+          * elementVibration("vanes", vane.userData.row, vane.userData.element)
           * 0.00009;
         vane.rotation.y = Math.sin(elapsed * 9.1 + vane.userData.row * 0.8 + vane.position.x * 0.13) * amplitude;
       }
       for (const spoiler of spoilerVisuals) {
         const amplitude = vibrationScale
-          * elementVibration(spoiler.userData.row, spoiler.userData.element)
+          * elementVibration("spoilers", spoiler.userData.row, spoiler.userData.element)
           * 0.00008;
         const baseAngle = THREE.MathUtils.degToRad(
           -live.config.spoilerAngleDeg + (spoiler.userData.angleOffset ?? 0),
@@ -1580,7 +1603,7 @@ export function WindScene({
       for (const set of damperSets) {
         set.meshes.forEach((damper) => {
           const pulse = 1 + vibrationScale
-            * elementVibration(set.row, damper.userData.element)
+            * elementVibration("dampers", set.row, damper.userData.element)
             * 0.00042
             * Math.sin(elapsed * 11.4 + set.row * 0.63 + damper.userData.element * 0.11);
           damper.scale.setScalar(damperBaseScale * pulse);
@@ -1601,9 +1624,13 @@ export function WindScene({
 
       const arrowDirection = new THREE.Vector3(normalizedFlowX, 0, normalizedFlowZ);
       maukaArrow.setDirection(arrowDirection);
-      maukaArrow.position.set(-normalizedFlowX * 23 + 14, 0.15, -normalizedFlowZ * 23);
-      maukaArrow.setLength(8, 1.2, 0.7);
-      bearingDisc.position.set(-normalizedFlowX * 23 + 14, 0.07, -normalizedFlowZ * 23);
+      maukaArrow.position.set(
+        arrayCenterX - normalizedFlowX * windMarkerLength / 2,
+        windMarkerHeight,
+        -normalizedFlowZ * windMarkerLength / 2,
+      );
+      maukaArrow.setLength(windMarkerLength, 1.8, 1.05);
+      bearingDisc.position.copy(maukaArrow.position);
 
       controls.update();
       renderer.render(scene, camera);
@@ -1647,11 +1674,11 @@ export function WindScene({
         <span className="solver-pulse" />
         <span>{getArrayMetrics(config.geometry).totalPanelCount}-PANEL FIELD SOLVER</span>
         <strong>
-          {config.mitigation === "screen"
-            ? config.screenStartRow === config.screenEndRow
-              ? `SCREEN BEHIND ROW ${config.screenStartRow}`
-              : `SCREENS BEHIND ROWS ${config.screenStartRow}–${config.screenEndRow}`
-            : MITIGATIONS[config.mitigation].short}
+          {config.activeMitigations.length === 0
+            ? MITIGATIONS.none.short
+            : config.activeMitigations.length === 1
+              ? MITIGATIONS[config.activeMitigations[0]].short
+              : `${config.activeMitigations.length} ACTIVE MITIGATIONS`}
         </strong>
       </div>
       <div className="scene-drag-hint">Drag to orbit · Scroll to zoom · Select a panel</div>
